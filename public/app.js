@@ -60,6 +60,7 @@
     send: svg('<path d="M5 12h14M13 6l6 6-6 6"/>', 'width="22" height="22"'),
     more: svg('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>'),
     shield: svg('<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>'),
+    feed: svg('<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/>'),
   };
 
   // ================================================================ state + api
@@ -68,7 +69,7 @@
     door: store.get('lhb_door', 'student'), authMode: 'login',
     tab: 'home', view: null,
     channels: null, thread: null, members: null, events: null, school: null, rides: null, offers: null, hangouts: null, spots: null,
-    notes: null, admin: null, today: null, tool: store.get('lhb_tool', 'metronome'), jokeOffset: 0, attach: null, busy: false,
+    notes: null, admin: null, today: null, feed: null, feedMore: false, post: null, hub: null, hubFeed: null, chatSeg: 'sections', feedAttach: null, replyAttach: null, tool: store.get('lhb_tool', 'metronome'), jokeOffset: 0, attach: null, busy: false,
   };
   const isStudent = () => S.me?.role === 'student';
   const isParent = () => S.me?.role === 'parent';
@@ -302,6 +303,9 @@
     if (!link) return false;
     const [k, id] = link.split(':');
     if (k === 'thread') return open('thread', Number(id));
+    if (k === 'post') return isStudent() ? (S.tab = 'feed', open('post', Number(id))) : false;
+    if (k === 'hub') return open('hub', Number(id));
+    if (k === 'feed') return isStudent() ? go('feed') : (open('hub', null), false);
     if (k === 'rides') return isStudent() || isParent() ? (S.tab = 'home', open('rides')) : false;
     if (k === 'hangouts') return isStudent() ? (S.tab = 'home', open('hangouts')) : false;
     if (k === 'calendar') return go('calendar');
@@ -318,6 +322,8 @@
       else if (v === 'rides') [S.rides, S.offers, S.today] = await Promise.all([api('/rides').then((d) => d.rides), api('/ride-offers').then((d) => d.offers), S.today || api('/today')]);
       else if (v === 'hangouts') [S.hangouts, S.spots] = await Promise.all([api('/hangouts').then((d) => d.hangouts), api('/spots').then((d) => d.spots)]);
       else if (v === 'admin') S.admin = await api('/admin');
+      else if (v === 'post') S.post = await api(`/feed/${S.view.id}/replies`);
+      else if (v === 'hub') { [S.hub, S.hubFeed] = await Promise.all([api(`/events/${S.view.id}/hub`), api(`/feed?event_id=${S.view.id}`).then((d) => d.posts)]); }
       else if (v === 'calendar') [S.events, S.school] = await Promise.all([api('/events').then((d) => d.events), S.school || api('/school-calendar').then((d) => d.days)]);
       else if (!v) {
         if (S.tab === 'home') {
@@ -325,7 +331,8 @@
           if (isStudent()) jobs.push(api('/hangouts').then((d) => d.hangouts));
           [S.events, S.today, S.rides, S.offers, S.hangouts] = await Promise.all(jobs);
         }
-        if (S.tab === 'threads' || S.tab === 'dms') S.channels = await api('/channels');
+        if (S.tab === 'threads' || S.tab === 'dms' || S.tab === 'chat') S.channels = await api('/channels');
+        if (S.tab === 'feed') { const d = await api('/feed'); S.feed = d.posts; S.feedMore = d.posts.length === 25; }
         if (S.tab === 'calendar') [S.events, S.school] = await Promise.all([api('/events').then((d) => d.events), S.school || api('/school-calendar').then((d) => d.days)]);
       }
     } catch (e) { toast(e.message, 'warn'); }
@@ -344,12 +351,13 @@
         soundCheck(b);
         const changed = JSON.stringify(b) !== JSON.stringify(S.badges);
         S.badges = b; paintBadges();
-        if (changed && !S.view && ['home', 'threads', 'dms'].includes(S.tab) && !document.activeElement?.matches('input, textarea, select') && !$('#modal-root').innerHTML) loadForScreen();
+        if (changed && !S.view && ['home', 'threads', 'dms', 'chat'].includes(S.tab) && !document.activeElement?.matches('input, textarea, select') && !$('#modal-root').innerHTML) loadForScreen();
       } catch { /* offline blip */ }
     }, 8000);
     threadTimer = setInterval(() => { if (!document.hidden && S.view?.name === 'thread') loadThread(false); }, 4000);
   }
   function stopPolling() { clearInterval(pollTimer); clearInterval(threadTimer); }
+  setInterval(() => { if (!document.hidden) tickCountdowns(); }, 1000);
 
   // ================================================================ shell
   function render() {
@@ -388,9 +396,9 @@
   function renderNav() {
     const b = S.badges;
     const tabs = isStudent()
-      ? [['home', 'Home', I.home, b.rides], ['threads', 'Sections', I.threads, b.threads], ['dms', 'Messages', I.chat, b.dms], ['tools', 'Tools', I.tools, 0], ['me', 'Me', I.profile, 0]]
+      ? [['home', 'Home', I.home, b.rides], ['feed', 'Feed', I.feed, 0], ['chat', 'Chat', I.chat, (b.threads || 0) + (b.dms || 0)], ['tools', 'Tools', I.tools, 0], ['me', 'Me', I.profile, 0]]
       : [['home', 'Home', I.home, b.rides], ['threads', 'Parents', I.threads, b.threads], ['dms', 'Messages', I.chat, b.dms], ['calendar', 'Calendar', I.cal, 0], ['me', 'Me', I.profile, 0]];
-    const cur = S.view?.name === 'thread' ? (S.thread?.channel?.kind === 'dm' ? 'dms' : 'threads') : S.tab;
+    const cur = S.view?.name === 'thread' ? (isStudent() ? 'chat' : S.thread?.channel?.kind === 'dm' ? 'dms' : 'threads') : S.view?.name === 'post' ? 'feed' : S.tab;
     return `<nav class="bottom-nav" id="nav" aria-label="Main">${tabs.map(([k, l, ic, n]) => `
       <button class="nav-item ${cur === k ? 'active' : ''}" data-act="tab" data-tab="${k}" ${cur === k ? 'aria-current="page"' : ''}>
         <span class="nav-icon">${ic}</span><span>${l}</span>${badge(n)}
@@ -405,7 +413,9 @@
     if (v === 'hangouts') return viewHangouts();
     if (v === 'admin') return viewAdmin();
     if (v === 'calendar') return viewCalendar();
-    return ({ home: viewHome, threads: viewThreads, dms: viewDms, tools: viewTools, calendar: viewCalendar, me: viewMe })[S.tab]?.() || viewHome();
+    if (v === 'post') return viewPost();
+    if (v === 'hub') return viewHub();
+    return ({ home: viewHome, feed: viewFeed, chat: viewChat, threads: viewThreads, dms: viewDms, tools: viewTools, calendar: viewCalendar, me: viewMe })[S.tab]?.() || viewHome();
   }
   const subHeader = (title, extra = '') => `<div class="subhead"><button class="icon-button" data-act="back" aria-label="Back">${I.back}</button><h2>${title}</h2>${extra}</div>`;
   const sectionTitle = (t, extra = '') => `<div class="section-title"><h2>${t}</h2>${extra}</div>`;
@@ -492,10 +502,10 @@
   const EV_EM = { rehearsal: '🎼', game: '🏈', competition: '🏆', concert: '🎻', sectional: '🥁', other: '📌' };
   function eventCard(e) {
     return `<div class="ev k-${e.kind} ${e.cancelled ? 'cancelled' : ''}"><span class="ev-em" aria-hidden="true">${EV_EM[e.kind] || '📌'}</span><div>
-      <h3>${esc(e.title)}</h3>
+      <h3><button class="linkish ev-link" data-act="open" data-view="hub" data-id="${e.id}">${esc(e.title)}</button></h3>
       <p class="small">${whenText(e.starts_at)}${e.call_time ? ` · <b>Call ${hm(e.call_time)}</b>` : ''}${e.section ? ` · ${secEm(e.section)} ${secName(e.section)}` : ''}</p>
       ${e.location ? `<p class="small muted">📍 ${esc(e.location)}</p>` : ''}${e.details ? `<p class="small muted">${esc(e.details)}</p>` : ''}
-      ${e.cancelled ? '<span class="pill st-declined">Cancelled</span>' : ''}
+      ${e.cancelled ? '<span class="pill st-declined">Cancelled</span>' : `<p class="small">${e.going ? `🙋 ${e.going} going` : ''}${e.my_rsvp === 'going' ? ' · <b>you\'re in</b>' : ''} <button class="linkish small" data-act="open" data-view="hub" data-id="${e.id}">${['competition', 'game', 'concert'].includes(e.kind) ? 'Open hub →' : 'Details →'}</button></p>`}
       ${S.me.is_admin && !e.cancelled ? `<div class="row wrap small-gap" style="margin-top:6px"><button class="linkish small" data-act="event-cancel" data-id="${e.id}">Cancel event</button></div>` : ''}</div></div>`;
   }
   function viewHome() {
@@ -510,10 +520,11 @@
       ${myRides.map((r) => `<button class="motivation-banner ${r.status === 'claimed' ? 'tone-green' : 'tone-pink'}" data-act="open" data-view="rides"><p class="motivation-copy">${r.driving ? `You're driving ${esc(first(r.requested_by.display_name))}` : r.status === 'claimed' ? `${esc(first(r.claimed_by.display_name))} is driving!` : 'Looking for a driver…'}<span class="mb-sub">${whenText(r.starts_at)} · ${esc(r.from_place)} → ${esc(r.to_place)}</span></p><span class="mb-emoji" aria-hidden="true">${r.status === 'claimed' ? '🚗' : '⏳'}</span></button>`).join('')}
       ${mySeats.map((o) => `<button class="motivation-banner tone-green" data-act="open" data-view="rides"><p class="motivation-copy">${o.mine ? `You're driving · ${o.taken}/${o.seats} seats` : `Riding with ${esc(first(o.driver.display_name))}`}<span class="mb-sub">${whenText(o.starts_at)} · ${esc(o.from_place)} → ${esc(o.to_place)}</span></p><span class="mb-emoji" aria-hidden="true">🚙</span></button>`).join('')}
       ${hint && isStudent() && !myRides.length ? `<button class="motivation-banner tone-blue" data-act="ride-sheet" data-reason="${hint.reason}"><p class="motivation-copy">${hint.word} after school<span class="mb-sub">${hint.w.temp}° · ${esc(hint.w.text)} · Tap to ask for a ride</span></p><span class="mb-emoji" aria-hidden="true">${hint.em}</span></button>` : ''}
+      ${countdownCard()}
       ${jokeCard()}
       <div class="dashboard-grid">
-        ${isStudent() ? `${card('chat', 'tab', '🥁', 'Sections', 'data-tab="threads"', b.threads)}
-          ${card('friends', 'tab', '💬', 'Messages', 'data-tab="dms"', b.dms)}
+        ${isStudent() ? `${card('chat', 'tab', '📸', 'Band Feed', 'data-tab="feed"')}
+          ${card('friends', 'tab', '💬', 'Chat', 'data-tab="chat"', (b.threads || 0) + (b.dms || 0))}
           ${card('games', 'tab', '⏱️', 'Metronome', 'data-tab="tools"')}
           ${card('plan', 'open', '🍕', 'Hangouts', 'data-view="hangouts"')}
           ${card('profile', 'open', '🚗', 'Rides', 'data-view="rides"', b.rides)}
@@ -557,7 +568,11 @@
   function viewDms() {
     const c = S.channels;
     if (!c) return sectionTitle('Messages') + empty('⏳', 'Loading…');
-    return `${sectionTitle('Messages', '<button class="warm-button sm" data-act="open" data-view="members">+ New</button>')}
+    const head = S.tab === 'chat' ? '' : sectionTitle('Messages', '<button class="warm-button sm" data-act="open" data-view="members">+ New</button>');
+    return `${head}${S.tab === 'chat' ? '<div class="row wrap" style="margin-bottom:10px"><button class="warm-button sm" data-act="open" data-view="members">+ New message</button><button class="primary-button sm" data-act="group-sheet">+ New group</button></div>' : ''}
+      ${c.groups?.length ? `<h3 class="sub-h">Groups</h3><div class="panel list">${c.groups.map((g) => `<button class="row-btn" data-act="open" data-view="thread" data-id="${g.id}"><span class="t-icon" aria-hidden="true">${g.expires_at ? '⏳' : '👥'}</span>
+          <span class="grow"><b>${esc(g.name)}</b><span class="sub">${g.members.length + 1} people${g.expires_at ? ` · ends ${dayLabel(new Date(g.expires_at))}` : ''}${g.last_body ? ' · ' + esc(g.last_body) : ''}</span></span>
+          <span class="meta">${g.last_at ? `<span class="tiny">${ago(g.last_at)}</span>` : ''}${g.unread ? `<span class="unread">${g.unread}</span>` : ''}</span></button>`).join('')}</div><h3 class="sub-h">Direct messages</h3>` : ''}
       <p class="note">${isStudent() ? '🔒 Private between students. Guardrails still block bullying, slurs, threats and explicit stuff.' : 'Private messages between parents.'}</p>
       ${c.dms.length ? `<div class="panel list">${c.dms.map((d) => `<button class="row-btn" data-act="open" data-view="thread" data-id="${d.id}">${ava(d.with.avatar)}
           <span class="grow"><b>${esc(d.with.display_name)}</b><span class="sub">${d.with.section ? secEm(d.with.section) + ' ' : ''}${esc(d.last_body || 'Say hi 👋')}</span></span>
@@ -616,9 +631,10 @@
     const t = S.thread && S.thread.channel.id === S.view.id ? S.thread : null;
     if (!t) return subHeader('…') + empty('⏳', 'Loading…');
     const c = t.channel;
-    const title = c.kind === 'dm' ? `${ava(t.peer?.avatar, 'sm')}<span>${esc(t.peer?.display_name || 'Message')}</span>` : `<span>${c.kind === 'section' ? secEm(c.section) + ' ' : '# '}${esc(c.name)}</span>`;
+    const title = c.is_group ? `<span>👥 ${esc(c.name)}</span>` : c.kind === 'dm' ? `${ava(t.peer?.avatar, 'sm')}<span>${esc(t.peer?.display_name || 'Message')}</span>` : `<span>${c.kind === 'section' ? secEm(c.section) + ' ' : '# '}${esc(c.name)}</span>`;
     const canPost = !c.locked || S.me.is_admin;
-    return `${subHeader(title, c.kind !== 'dm' && (c.mine || S.me.is_admin) && c.kind === 'topic' ? `<button class="icon-button" data-act="thread-menu" aria-label="Thread options">${I.more}</button>` : '')}
+    return `${subHeader(title, c.is_group ? `<button class="icon-button" data-act="group-menu" aria-label="Group options">${I.more}</button>` : c.kind !== 'dm' && (c.mine || S.me.is_admin) && c.kind === 'topic' ? `<button class="icon-button" data-act="thread-menu" aria-label="Thread options">${I.more}</button>` : '')}
+      ${c.is_group ? `<p class="note small">👥 ${t.members.map((m) => esc(first(m.display_name))).join(', ')}${c.expires_at ? ` · ⏳ ends ${whenText(c.expires_at)}` : ''}</p>` : ''}
       ${c.about ? `<p class="note small">${esc(c.about)}</p>` : ''}
       <div class="posts" id="msgs" aria-live="polite">${postsHTML()}</div>
       <div class="chat-pad"></div>
@@ -627,7 +643,7 @@
         <input type="file" id="file-in" accept="application/pdf,image/*" hidden>
         <button type="button" class="attach" data-act="attach" aria-label="Attach sheet music or a photo">📎</button>
         <label class="sr" for="msg-input">Message</label>
-        <textarea id="msg-input" class="field" name="body" rows="1" maxlength="2000" placeholder="${c.kind === 'dm' ? `Message ${esc(first(t.peer?.display_name))}…` : `Message ${esc(c.name)}…`}" enterkeyhint="send"></textarea>
+        <textarea id="msg-input" class="field" name="body" rows="1" maxlength="2000" placeholder="${c.kind === 'dm' && !c.is_group ? `Message ${esc(first(t.peer?.display_name))}…` : `Message ${esc(c.name)}…`}" enterkeyhint="send"></textarea>
         <button class="primary-button" type="submit" aria-label="Send">${I.send}</button>
       </form>` : '<p class="guard-note">📌 Only admins can post in this thread.</p>'}`;
   }
@@ -635,6 +651,160 @@
     if (!$('#msgs')) return;
     const near = innerHeight + scrollY > document.body.scrollHeight - 260;
     if (force || near) requestAnimationFrame(() => scrollTo(0, document.body.scrollHeight));
+  }
+
+  // ================================================================ Band Room Feed
+  const REACT = { fire: ['🔥', 'Fire'], lol: ['😂', 'LOL'], dead: ['💀', 'Dead'], drum: ['🥁', 'Ba-dum-tss'], toot: ['🎺', 'Toot'], clap: ['👏', 'Clap'], salute: ['🫡', 'Mark time'], trophy: ['🏆', 'Trophy'], heart: ['💜', 'Love'], encore: ['📯', 'Encore'] };
+  function reactBar(p) {
+    const keys = Object.keys(REACT);
+    const used = keys.filter((k) => p.reactions[k]);
+    return `<div class="react-bar">${used.map((k) => `<button class="react ${p.reactions[k].mine ? 'on' : ''}" data-act="react" data-id="${p.id}" data-e="${k}" aria-pressed="${p.reactions[k].mine}" aria-label="${REACT[k][1]}: ${p.reactions[k].n}"><span aria-hidden="true">${REACT[k][0]}</span>${p.reactions[k].n}</button>`).join('')}
+      ${isStudent() ? `<button class="react add" data-act="react-pick" data-id="${p.id}" aria-label="Add a reaction">＋${used.length ? '' : ' React'}</button>` : ''}</div>`;
+  }
+  function pollHTML(p) {
+    const pl = p.poll; if (!pl) return '';
+    const voted = !!pl.my_vote;
+    return `<div class="poll ${p.kind}">${pl.options.map((o) => {
+      const pct = pl.total ? Math.round(o.n * 100 / pl.total) : 0;
+      return `<button class="poll-opt ${pl.my_vote === o.id ? 'mine' : ''}" data-act="vote" data-id="${p.id}" data-o="${o.id}" ${!isStudent() ? 'disabled' : ''}>
+        <span class="bar" style="width:${voted || p.kind === 'ask' ? pct : 0}%"></span><span class="lbl">${esc(o.label)}</span>${voted || p.kind === 'ask' ? `<span class="pct">${p.kind === 'ask' ? o.n : pct + '%'}</span>` : ''}
+        ${o.voters?.length ? `<span class="voters">${o.voters.slice(0, 8).map((v) => ava(v.avatar)).join('')}</span>` : ''}</button>`;
+    }).join('')}<p class="tiny muted">${p.kind === 'ask' ? 'Tap to answer' : `${pl.total} vote${pl.total === 1 ? '' : 's'}${voted ? ' · tap to change' : ' · tap to vote'}`}</p></div>`;
+  }
+  function feedCard(p, { full = false } = {}) {
+    if (p.deleted) return '';
+    return `<article class="fpost ${p.official ? 'official' : ''}">
+      <header>${ava(p.author?.avatar)}<div class="grow"><b>${esc(p.author?.display_name || 'Former member')}</b>${p.official ? ' <span class="p-tag admin">📣 Official</span>' : ''}
+        <span class="tiny muted">${p.author?.section ? secEm(p.author.section) + ' ' + secName(p.author.section) + ' · ' : ''}${ago(p.created_at)}</span></div>
+        <button class="p-more" data-act="feed-menu" data-id="${p.id}" aria-label="More options">${I.more}</button></header>
+      ${p.kind === 'ask' ? '<span class="ask-tag">🙋 Who\'s in?</span>' : p.kind === 'poll' ? '<span class="ask-tag">📊 Poll</span>' : ''}
+      ${p.body ? `<p class="f-body">${linkify(p.body)}</p>` : ''}
+      ${p.file ? (p.file.kind === 'image' ? `<img class="f-photo" src="/api/files/${p.file.id}" alt="Photo posted by ${esc(first(p.author?.display_name))}" loading="lazy">` : fileHTML(p.file)) : ''}
+      ${pollHTML(p)}
+      ${reactBar(p)}
+      ${!full && isStudent() ? `<button class="linkish small replies-link" data-act="open" data-view="post" data-id="${p.id}">💬 ${p.replies ? `${p.replies} repl${p.replies === 1 ? 'y' : 'ies'}` : 'Reply'}</button>` : ''}
+    </article>`;
+  }
+  function feedComposer(eventId) {
+    return `<form class="panel stack f-compose" data-form="feed-post">${eventId ? `<input type="hidden" name="event_id" value="${eventId}">` : ''}
+      <input type="hidden" name="kind" value="post">
+      <textarea class="field" name="body" rows="2" maxlength="1500" placeholder="${eventId ? 'Live from the event… 🎺' : 'What happened at rehearsal? 📸'}"></textarea>
+      <div class="poll-fields" hidden><input class="field" name="o1" placeholder="Choice 1" maxlength="60"><input class="field" name="o2" placeholder="Choice 2" maxlength="60"><input class="field" name="o3" placeholder="Choice 3 (optional)" maxlength="60"><input class="field" name="o4" placeholder="Choice 4 (optional)" maxlength="60"></div>
+      ${S.feedAttach ? `<div class="attach-preview">📷 ${esc(S.feedAttach.name)}<button type="button" class="linkish" data-act="feed-attach-clear">Remove</button></div>` : ''}
+      <input type="file" id="feed-file" accept="image/*" hidden>
+      <div class="row wrap small-gap">
+        <button type="button" class="chip" data-act="feed-photo">📷 Photo</button>
+        <button type="button" class="chip" data-act="feed-kind" data-k="poll" aria-pressed="false">📊 Poll</button>
+        <button type="button" class="chip" data-act="feed-kind" data-k="ask" aria-pressed="false">🙋 Who's in?</button>
+        ${S.me.is_admin ? '<label class="check small"><input type="checkbox" name="official"><span>📣 Official (parents see it too)</span></label>' : ''}
+        <span class="grow"></span><button class="primary-button sm" type="submit">Post</button></div>
+      ${errP}</form>`;
+  }
+  function viewFeed() {
+    const f = S.feed;
+    return `${sectionTitle('Band Room 📸')}
+      <p class="note">Students only — post the funny moments, memes and backstage pics. Be kind: posts are checked and anyone can report.</p>
+      ${feedComposer()}
+      ${!f ? empty('⏳', 'Loading…') : f.length ? f.map((p) => feedCard(p)).join('') + (S.feedMore ? '<button class="ghost-button block" data-act="feed-more">Load more</button>' : '<p class="center tiny muted">You\'re all caught up 🎉</p>') : empty('📸', 'Nothing posted yet. Be the first!')}`;
+  }
+  function viewPost() {
+    const d = S.post && S.post.post?.id === S.view.id ? S.post : null;
+    if (!d) return subHeader('Post') + empty('⏳', 'Loading…');
+    return `${subHeader('Post')}${feedCard(d.post, { full: true })}
+      <div class="replies">${d.replies.filter((r) => !r.deleted).map((r) => `<div class="post ${r.mine ? 'mine' : ''}">${ava(r.author?.avatar)}<div>
+        <div class="p-head"><span class="p-name">${esc(r.author?.display_name || 'Former member')}</span><span class="p-time">${ago(r.created_at)}</span></div>
+        ${r.body ? `<div class="p-body">${linkify(r.body)}</div>` : ''}${r.file ? `<img class="photo" src="/api/files/${r.file.id}" alt="Photo reply" loading="lazy">` : ''}</div>
+        <button class="p-more" data-act="reply-menu" data-id="${r.id}" aria-label="More options">${I.more}</button></div>`).join('') || '<p class="small muted center">No replies yet.</p>'}</div>
+      <div class="chat-pad"></div>
+      <form class="composer" data-form="reply">
+        ${S.replyAttach ? `<div class="attach-preview">📷 ${esc(S.replyAttach.name)}<button type="button" class="linkish" data-act="reply-attach-clear">Remove</button></div>` : ''}
+        <input type="file" id="reply-file" accept="image/*" hidden>
+        <button type="button" class="attach" data-act="reply-photo" aria-label="Reply with a photo">📷</button>
+        <label class="sr" for="msg-input">Reply</label>
+        <textarea id="msg-input" class="field" name="body" rows="1" maxlength="1000" placeholder="Reply…" enterkeyhint="send"></textarea>
+        <button class="primary-button" type="submit" aria-label="Send">${I.send}</button></form>`;
+  }
+  function sheetReactPick(id) {
+    openSheet(`<div class="stack"><h2>React</h2><div class="react-grid">${Object.entries(REACT).map(([k, [e, l]]) => `<button class="react-big" data-act="react" data-id="${id}" data-e="${k}"><span>${e}</span>${l}</button>`).join('')}</div>${cancelBtn}</div>`);
+  }
+
+  // ================================================================ Chat tab (students): sections + messages
+  function viewChat() {
+    const seg = S.chatSeg;
+    const b = S.badges;
+    return `${sectionTitle('Chat')}
+      <div class="chips seg chat-seg" role="tablist"><button class="chip" data-act="chat-seg" data-s="sections" aria-pressed="${seg === 'sections'}">🥁 Sections${b.threads ? ` (${b.threads})` : ''}</button>
+        <button class="chip" data-act="chat-seg" data-s="messages" aria-pressed="${seg === 'messages'}">💬 Messages + groups${b.dms ? ` (${b.dms})` : ''}</button></div>
+      ${seg === 'sections' ? viewThreads().replace(/^<div class="section-title">.*?<\/div>/s, '') : viewDms()}`;
+  }
+  function sheetGroup() {
+    const ms = (S.members || []).filter((m) => m.id !== S.me.id && !m.blocked);
+    const evs = (S.events || []).filter((e) => !e.cancelled);
+    openSheet(`<form data-form="group" class="stack"><h2>New group 👥</h2>
+      <label class="fld"><span>Group name</span><input class="field" name="name" maxlength="50" required placeholder="Bus 2 crew, Saturday carpool, Low brass besties"></label>
+      <fieldset class="stack-sm"><span>Who's in?</span><div class="chips group-pick" role="group">${ms.map((m) => `<button type="button" class="chip" data-act="toggle-chip" data-v="${m.id}" aria-pressed="false">${AVATAR[m.avatar]?.[0] || ''} ${esc(m.display_name)}</button>`).join('') || '<p class="small muted">Loading people…</p>'}</div></fieldset>
+      <label class="check"><input type="checkbox" name="temp" data-act="noop"><span>⏳ Temporary — disappears after a date (great for trips + carpools)</span></label>
+      <label class="fld"><span>Ends on (if temporary)</span><input class="field" type="date" name="ends" min="${localDate()}" value="${localDate(new Date(Date.now() + 3 * 864e5))}"></label>
+      ${evs.length ? `<label class="fld"><span>For an event? (optional)</span><select class="field" name="event_id"><option value="">No</option>${evs.map((e) => `<option value="${e.id}">${esc(e.title)} · ${dayLabel(new Date(e.starts_at))}</option>`).join('')}</select></label>` : ''}
+      ${errP}<button class="primary-button block big" type="submit">Create group</button>${cancelBtn}</form>`);
+  }
+
+  // ================================================================ Competition Day Hub
+  let countdownTimer = null;
+  function countdownText(iso) {
+    const ms = new Date(iso) - Date.now();
+    if (ms <= 0) return 'Happening now! 🎺';
+    const d = Math.floor(ms / 864e5), h = Math.floor(ms / 3600e3) % 24, m = Math.floor(ms / 60e3) % 60, s = Math.floor(ms / 1000) % 60;
+    return d ? `${d}d ${h}h ${m}m` : `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+  }
+  function tickCountdowns() { $$('[data-countdown]').forEach((el) => { el.textContent = countdownText(el.dataset.countdown); }); }
+  function countdownCard() {
+    const next = (S.events || []).find((e) => !e.cancelled && ['competition', 'game', 'concert'].includes(e.kind));
+    if (!next) return '';
+    return `<button class="countdown-card" data-act="open" data-view="hub" data-id="${next.id}">
+      <span class="cd-label">${EV_EM[next.kind]} Next ${next.kind}</span><b class="cd-title">${esc(next.title)}</b>
+      <span class="cd-time" data-countdown="${next.starts_at}">${countdownText(next.starts_at)}</span>
+      <span class="cd-sub">${whenText(next.starts_at)}${next.call_time ? ` · call ${hm(next.call_time)}` : ''} · Open the hub →</span></button>`;
+  }
+  function viewHub() {
+    const h = S.hub;
+    if (!h || h.event.id !== S.view.id) return subHeader('Event') + empty('⏳', 'Loading…');
+    const e = h.event, isBig = ['competition', 'game', 'concert'].includes(e.kind);
+    const myBus = h.buses.find((b) => b.id === h.my_bus);
+    const preds = (S.hubFeed || []).filter((p) => p.kind === 'poll');
+    const updates = (S.hubFeed || []).filter((p) => p.kind !== 'poll');
+    return `${subHeader(`${EV_EM[e.kind] || '📌'} ${isBig ? 'Hub' : 'Event'}`, S.me.is_admin ? '<button class="warm-button sm" data-act="hub-edit">Edit</button>' : '')}
+      <div class="hub-hero ${e.cancelled ? 'cancelled' : ''}">
+        <h2>${esc(e.title)}</h2>
+        <p>${whenText(e.starts_at)}${e.location ? ` · 📍 ${esc(e.location)}` : ''}</p>
+        ${e.cancelled ? '<span class="pill st-declined">Cancelled</span>' : `<div class="cd-big" data-countdown="${e.starts_at}">${countdownText(e.starts_at)}</div>`}
+        ${e.call_time ? `<div class="call-time">Call time <b>${hm(e.call_time)}</b></div>` : ''}
+        ${myBus ? `<div class="my-bus">🚌 You're on <b>${esc(myBus.name)}</b>${myBus.notes ? ` · ${esc(myBus.notes)}` : ''}</div>` : ''}
+        ${e.details ? `<p class="small">${esc(e.details)}</p>` : ''}
+      </div>
+      <div class="panel stack"><h3>🙋 Who's going?</h3>
+        <div class="row wrap small-gap">${['going', 'maybe', 'no'].map((st) => `<button class="chip" data-act="ev-rsvp" data-id="${e.id}" data-s="${st}" aria-pressed="${h.my_rsvp === st}">${{ going: "✅ I'm going", maybe: '🤔 Maybe', no: "❌ Can't" }[st]}</button>`).join('')}</div>
+        ${h.going.length ? `<div class="going-row">${h.going.slice(0, 24).map((g) => ava(g.avatar)).join('')}<span class="small">${h.going.map((g) => esc(first(g.display_name))).slice(0, 8).join(', ')}${h.going.length > 8 ? ` +${h.going.length - 8}` : ''}</span></div>` : `<p class="small muted">${h.counts.going} going${h.counts.maybe ? ` · ${h.counts.maybe} maybe` : ''}</p>`}
+        ${isStudent() ? `<button class="ghost-button sm" data-act="group-for-event" data-id="${e.id}">👥 Start a group chat for this trip</button>` : ''}</div>
+      ${h.schedule.length ? `<div class="panel stack"><h3>🕒 Schedule</h3><ol class="timeline">${h.schedule.map((s) => `<li><b>${hm(s.at_time)}</b><span>${esc(s.label)}</span></li>`).join('')}</ol></div>` : ''}
+      ${h.order.length ? `<div class="panel stack"><h3>🎺 Performance order</h3><ol class="perf-order">${h.order.map((o) => `<li class="${o.is_us ? 'us' : ''}"><span class="pos">${o.position}</span><span class="grow">${esc(o.band_name)}${o.is_us ? ' ⭐' : ''}</span>${o.perform_at ? `<b>${hm(o.perform_at)}</b>` : ''}</li>`).join('')}</ol></div>` : ''}
+      ${h.buses.length ? `<div class="panel stack"><h3>🚌 Buses</h3>${h.buses.map((b) => `<details class="bus ${b.id === h.my_bus ? 'mine' : ''}" ${b.id === h.my_bus ? 'open' : ''}><summary><b>${esc(b.name)}</b> · ${b.riders.length} people${b.notes ? ` · ${esc(b.notes)}` : ''}${b.id === h.my_bus ? ' · <b>you</b>' : ''}</summary>
+        <p class="small">${b.riders.map((r) => esc(r.display_name)).join(', ') || 'No one yet'}</p></details>`).join('')}</div>` : ''}
+      ${isStudent() || preds.length ? `${sectionTitle('🔮 Predictions', isStudent() ? `<button class="ghost-button sm" data-act="predict" data-id="${e.id}">+ Prediction</button>` : '')}${preds.length ? preds.map((p) => feedCard(p)).join('') : '<p class="small muted">Who takes 1st? Rival matchups? Make the first prediction.</p>'}` : ''}
+      ${sectionTitle('📡 Live updates')}
+      ${isStudent() ? feedComposer(e.id) : ''}
+      ${updates.length ? updates.map((p) => feedCard(p)).join('') : empty('📡', isStudent() ? 'Post updates and pics from the event here.' : 'Official updates from the band will show here.')}`;
+  }
+  function sheetHubEdit() {
+    const h = S.hub;
+    const schedTxt = h.schedule.map((s) => `${s.at_time} ${s.label}`).join('\n');
+    const orderTxt = h.order.map((o) => `${o.perform_at || ''} ${o.band_name}${o.is_us ? ' *' : ''}`.trim()).join('\n');
+    const busTxt = h.buses.map((b) => `${b.name}: ${b.riders.map((r) => r.display_name).join(', ')}`).join('\n');
+    openSheet(`<form data-form="hub-edit" class="stack"><h2>Edit hub</h2>
+      <label class="fld"><span>Schedule — one per line: <code>14:30 Warm-up</code></span><textarea class="field mono" name="schedule" rows="6" placeholder="06:45 Call time — band room\n07:15 Buses leave\n13:40 Warm-up\n14:15 We perform!">${esc(schedTxt)}</textarea></label>
+      <label class="fld"><span>Performance order — one band per line, time first, <code>*</code> = us</span><textarea class="field mono" name="order" rows="6" placeholder="14:00 Harrisburg\n14:15 Our band *\n14:30 Brandon Valley">${esc(orderTxt)}</textarea></label>
+      <label class="fld"><span>Buses — <code>Bus 1: percussion, guard, Ava</code> (sections or names)</span><textarea class="field mono" name="buses" rows="4" placeholder="Bus 1: percussion, guard\nBus 2: brass, woodwinds, front">${esc(busTxt)}</textarea></label>
+      ${errP}<button class="primary-button block big" type="submit">Save hub</button>${cancelBtn}</form>`);
   }
 
   // ================================================================ tools
@@ -797,7 +967,7 @@
   // ================================================================ notifications
   function viewNotifications() {
     const list = S.notes;
-    const icon = { dm: '💬', mention: '📣', ride: '🚗', ride_update: '🚗', event: '📅', hangout: '🍕', safety: '🛡️' };
+    const icon = { dm: '💬', mention: '💬', ride: '🚗', ride_update: '🚗', event: '📅', hangout: '🍕', safety: '🛡️' };
     return `${subHeader('Notifications', '<button class="linkish small" data-act="read-all">Mark all read</button>')}
       ${!list ? empty('⏳', 'Loading…') : !list.length ? empty('🔔', 'Nothing yet.') : `<div class="panel list">${list.map((n) => `<button class="row-btn ${n.read_at ? '' : 'unread-row'}" data-act="note" data-id="${n.id}" data-link="${esc(n.link || '')}">
         <span class="feed-icon" aria-hidden="true">${icon[n.type] || '🔔'}</span><span class="grow"><b>${esc(n.title)}</b>${n.body ? `<span class="sub">${esc(n.body)}</span>` : ''}<span class="tiny">${ago(n.created_at)}</span></span></button>`).join('')}</div>`}`;
@@ -939,6 +1109,27 @@
   }
   const setPressed = (el, sel) => $$(sel, el.closest('form') || el.closest('.row, .chips') || document).forEach((b) => b.setAttribute('aria-pressed', String(b === el)));
   let pendingPost = null;
+  let pendingFeed = null;
+  const findFeed = (id) => (S.feed || []).find((p) => p.id === id) || (S.hubFeed || []).find((p) => p.id === id) || (S.post?.post?.id === id ? S.post.post : null);
+  async function refreshFeedItem(id) {
+    if (S.view?.name === 'post') { S.post = await api(`/feed/${S.view.id}/replies`); paint(); return; }
+    if (S.view?.name === 'hub') { S.hubFeed = (await api(`/feed?event_id=${S.view.id}`)).posts; paint(); return; }
+    const d = await api(`/feed/${id}/replies`).catch(() => null);
+    if (d && S.feed) { S.feed = S.feed.map((p) => (p.id === id ? d.post : p)); paint(); }
+  }
+  /** Names or section keys → member ids, for bus lists like "Bus 1: percussion, guard, Ava". */
+  function resolvePeople(list) {
+    const ids = new Set(), unknown = [];
+    for (const raw of list.split(',').map((x) => x.trim()).filter(Boolean)) {
+      const k = raw.toLowerCase();
+      const sec = Object.keys(SECTION).find((s) => s === k || secName(s).toLowerCase() === k);
+      const roster = S.roster || S.members || [];
+      if (sec && sec !== 'all' && sec !== 'parents') { roster.filter((m) => m.section === sec).forEach((m) => ids.add(m.id)); continue; }
+      const m = roster.find((x) => x.display_name.toLowerCase() === k || x.username.toLowerCase() === k.replace(/^@/, '') || first(x.display_name).toLowerCase() === k);
+      if (m) ids.add(m.id); else unknown.push(raw);
+    }
+    return { ids: [...ids], unknown };
+  }
   async function refreshMe() { const d = await api('/me'); S.me = d.user; S.band = d.band; S.badges = d.badges; S.smsLive = d.sms_live; soundCheck(d.badges); if (S.me.theme && S.me.theme !== theme()) applyTheme(S.me.theme); }
 
   const A = {
@@ -951,6 +1142,60 @@
     'close-sheet': () => closeSheet(),
     'close-sheet-bg': (el, e) => { if (e.target === el) closeSheet(); },
     'joke-next': () => { S.jokeOffset++; paint(); },
+    'chat-seg': (el) => { S.chatSeg = el.dataset.s; paint(); },
+    'feed-more': (el) => withBusy(el, async () => { const last = S.feed[S.feed.length - 1]; const d = await api(`/feed?before=${last.id}`); S.feed = S.feed.concat(d.posts); S.feedMore = d.posts.length === 25; paint(); }),
+    'feed-photo': () => $('#feed-file')?.click(),
+    'feed-attach-clear': () => { S.feedAttach = null; paint(); },
+    'reply-photo': () => $('#reply-file')?.click(),
+    'reply-attach-clear': () => { S.replyAttach = null; paint(); scrollChat(true); },
+    'feed-kind': (el) => {
+      const f = el.closest('form'); const on = el.getAttribute('aria-pressed') !== 'true';
+      $$('[data-act=feed-kind]', f).forEach((b) => b.setAttribute('aria-pressed', String(b === el && on)));
+      f.kind.value = on ? el.dataset.k : 'post';
+      f.querySelector('.poll-fields').hidden = f.kind.value !== 'poll';
+      f.body.placeholder = f.kind.value === 'poll' ? 'Ask a question… (e.g. Which section is surviving competition season?)' : f.kind.value === 'ask' ? "Who's in? (e.g. Anyone staying after rehearsal to practice?)" : (f.event_id ? 'Live from the event… 🎺' : 'What happened at rehearsal? 📸');
+    },
+    react: (el) => withBusy(el, async () => { await api(`/feed/${el.dataset.id}/react`, { method: 'POST', body: { emoji: el.dataset.e } }); closeSheet(); await refreshFeedItem(Number(el.dataset.id)); }),
+    'react-pick': (el) => sheetReactPick(Number(el.dataset.id)),
+    vote: (el) => withBusy(el, async () => { await api(`/feed/${el.dataset.id}/vote`, { method: 'POST', body: { option_id: Number(el.dataset.o) } }); await refreshFeedItem(Number(el.dataset.id)); }),
+    'feed-menu': (el) => {
+      const id = Number(el.dataset.id); const p = findFeed(id); if (!p) return;
+      openSheet(`<div class="stack"><h2>Post</h2>
+        ${!p.mine ? `<button class="danger-button block" data-act="feed-report" data-id="${id}">🚩 Report</button>` : ''}
+        ${p.mine || S.me.is_admin ? `<button class="ghost-button block" data-act="feed-delete" data-id="${id}">🗑️ Delete${p.mine ? '' : ' (admin)'}</button>` : ''}
+        ${!p.mine && p.author && isStudent() ? `<button class="ghost-button block" data-act="block" data-id="${p.author.id}">🚫 Block ${esc(first(p.author.display_name))}</button>` : ''}${cancelBtn}</div>`);
+    },
+    'feed-delete': (el) => withBusy(el, async () => { await api(`/feed/${el.dataset.id}`, { method: 'DELETE' }); closeSheet(); toast('Post deleted'); if (S.view?.name === 'post') back(); else loadForScreen(); }),
+    'feed-report': (el) => openSheet(`<form data-form="feed-report" class="stack"><input type="hidden" name="feed_post_id" value="${el.dataset.id}"><h2>Report this post</h2>
+      <div class="chips" role="group">${[['mean', 'Mean'], ['bullying', 'Bullying'], ['inappropriate', 'Inappropriate'], ['photo', 'Bad photo'], ['other', 'Other']].map(([k, l]) => `<button type="button" class="chip" data-act="pick" data-name="reason" data-v="${k}" aria-pressed="false">${l}</button>`).join('')}</div>
+      <input type="hidden" name="reason" value=""><label class="fld"><span>Anything else? (optional)</span><input class="field" name="details" maxlength="500"></label>${errP}<button class="danger-button block big" type="submit">Send report</button>${cancelBtn}</form>`),
+    'reply-menu': (el) => {
+      const r = S.post?.replies.find((x) => x.id === Number(el.dataset.id)); if (!r) return;
+      openSheet(`<div class="stack"><h2>Reply</h2>${!r.mine ? `<button class="danger-button block" data-act="reply-report" data-id="${r.id}">🚩 Report</button>` : ''}
+        ${r.mine || S.me.is_admin ? `<button class="ghost-button block" data-act="reply-delete" data-id="${r.id}">🗑️ Delete</button>` : ''}${cancelBtn}</div>`);
+    },
+    'reply-delete': (el) => withBusy(el, async () => { await api(`/replies/${el.dataset.id}`, { method: 'DELETE' }); closeSheet(); loadForScreen(); }),
+    'reply-report': (el) => withBusy(el, async () => { await api('/reports', { method: 'POST', body: { reply_id: Number(el.dataset.id), reason: 'mean' } }); closeSheet(); toast('🛡️ Report sent to the admins'); }),
+    'group-sheet': async () => { if (!S.members) S.members = (await api('/members')).members; if (!S.events) S.events = (await api('/events')).events; sheetGroup(); },
+    'group-for-event': async (el) => { if (!S.members) S.members = (await api('/members')).members; if (!S.events) S.events = (await api('/events')).events; sheetGroup(); const f = $('form[data-form=group]'); if (f?.event_id) f.event_id.value = el.dataset.id; if (f) { f.temp.checked = true; f.name.value = `${S.hub?.event?.title || 'Trip'} crew`; } },
+    'group-menu': () => {
+      const c = S.thread.channel;
+      openSheet(`<div class="stack"><h2>👥 ${esc(c.name)}</h2><p class="small muted">${S.thread.members.map((m) => esc(m.display_name)).join(', ')}</p>
+        ${c.mine || S.me.is_admin ? '<button class="ghost-button block" data-act="group-add">➕ Add people</button>' : ''}
+        <button class="danger-button block" data-act="group-leave">🚪 Leave group</button>${cancelBtn}</div>`);
+    },
+    'group-add': async () => {
+      if (!S.members) S.members = (await api('/members')).members;
+      const inIds = new Set(S.thread.members.map((m) => m.id));
+      openSheet(`<form data-form="group-add" class="stack"><h2>Add people</h2><div class="chips" role="group">${S.members.filter((m) => !inIds.has(m.id) && !m.blocked).map((m) => `<button type="button" class="chip" data-act="toggle-chip" data-v="${m.id}" aria-pressed="false">${esc(m.display_name)}</button>`).join('') || '<p class="small muted">Everyone is already in!</p>'}</div>${errP}<button class="primary-button block big" type="submit">Add</button>${cancelBtn}</form>`);
+    },
+    'group-leave': (el) => withBusy(el, async () => { await api(`/groups/${S.view.id}`, { method: 'PATCH', body: { leave: true } }); closeSheet(); toast('You left the group'); go('chat'); }),
+    'ev-rsvp': (el) => withBusy(el, async () => { await api(`/events/${el.dataset.id}/rsvp`, { method: 'POST', body: { status: el.dataset.s } }); if (el.dataset.s === 'going') confetti(); loadForScreen(); }),
+    'hub-edit': () => sheetHubEdit(),
+    predict: (el) => openSheet(`<form data-form="feed-post" class="stack"><input type="hidden" name="event_id" value="${el.dataset.id}"><input type="hidden" name="kind" value="poll"><h2>🔮 New prediction</h2>
+      <textarea class="field" name="body" rows="2" maxlength="300" placeholder="Where do we place? Do we beat Brandon Valley's drumline?" required></textarea>
+      <div class="poll-fields"><input class="field" name="o1" placeholder="Choice 1" required><input class="field" name="o2" placeholder="Choice 2" required><input class="field" name="o3" placeholder="Choice 3 (optional)"><input class="field" name="o4" placeholder="Choice 4 (optional)"></div>
+      ${errP}<button class="primary-button block big" type="submit">Post prediction</button>${cancelBtn}</form>`),
     tool: (el) => { S.tool = el.dataset.k; store.set('lhb_tool', S.tool); paint(); },
     'thread-new': (el) => sheetThreadNew(el.dataset.section),
     'thread-menu': () => {
@@ -969,7 +1214,11 @@
     'post-menu': (el) => sheetPostMenu(Number(el.dataset.id)),
     'post-delete': (el) => withBusy(el, async () => { await api(`/posts/${el.dataset.id}`, { method: 'DELETE' }); closeSheet(); await loadThread(true); paint(); }),
     'report-sheet': (el) => sheetReport(Number(el.dataset.id)),
-    'nudge-send': (el) => withBusy(el, async () => { if (!pendingPost) return closeSheet(); await sendPost(pendingPost.body, true); closeSheet(); }),
+    'nudge-send': (el) => withBusy(el, async () => {
+      if (!pendingPost) return closeSheet();
+      if (pendingPost.reply) { await api(`/feed/${S.view.id}/replies`, { method: 'POST', body: { body: pendingPost.body, file_id: pendingPost.file_id, confirm: true } }); pendingPost = null; S.replyAttach = null; closeSheet(); S.post = await api(`/feed/${S.view.id}/replies`); paint(); scrollChat(true); return; }
+      await sendPost(pendingPost.body, true); closeSheet();
+    }),
     pick: (el) => { setPressed(el, `[data-act=pick][data-name="${el.dataset.name}"]`); const f = el.closest('form'); if (f?.[el.dataset.name]) f[el.dataset.name].value = el.dataset.v; },
     'toggle-chip': (el) => el.setAttribute('aria-pressed', String(el.getAttribute('aria-pressed') !== 'true')),
     ava: (el) => { $$('[data-act=ava]').forEach((b) => b.setAttribute('aria-checked', String(b === el))); el.closest('form').avatar.value = el.dataset.k; },
@@ -1037,6 +1286,56 @@
       if (!body && !S.attach) return;
       try { await sendPost(body, false); } catch (e) { if (e.data?.blocked) toast('🚫 ' + e.message, 'warn'); else throw e; }
     },
+    'feed-post': async (f, d) => {
+      const kind = d.get('kind') || 'post';
+      const body = { kind, body: String(d.get('body') || '').trim(), event_id: Number(d.get('event_id')) || null, official: d.get('official') === 'on' };
+      if (kind === 'poll') body.options = ['o1', 'o2', 'o3', 'o4'].map((k) => String(d.get(k) || '').trim()).filter(Boolean);
+      if (S.feedAttach && f.closest('.sheet') === null) { const up = await upload(S.feedAttach.file); body.file_id = up.id; }
+      try {
+        const r = await api('/feed', { method: 'POST', body: pendingFeed ? { ...body, confirm: true } : body });
+        pendingFeed = null; S.feedAttach = null; closeSheet();
+        toast(kind === 'poll' ? '📊 Poll posted' : kind === 'ask' ? "🙋 Posted — let's see who's in" : '📸 Posted!');
+        if (r.support) sheetSupport(r.support);
+        loadForScreen();
+      } catch (e) {
+        if (e.data?.nudge && !pendingFeed) { pendingFeed = body; if (confirm(e.message)) return F['feed-post'](f, d); pendingFeed = null; return; }
+        pendingFeed = null; throw e;
+      }
+    },
+    reply: async (f, d) => {
+      const body = { body: String(d.get('body') || '').trim() };
+      if (!body.body && !S.replyAttach) return;
+      if (S.replyAttach) { const up = await upload(S.replyAttach.file); body.file_id = up.id; }
+      try {
+        const r = await api(`/feed/${S.view.id}/replies`, { method: 'POST', body });
+        S.replyAttach = null; S.post = await api(`/feed/${S.view.id}/replies`); paint(); scrollChat(true);
+        if (r.support) sheetSupport(r.support);
+      } catch (e) {
+        if (e.data?.nudge) { pendingPost = { body: body.body, reply: true, file_id: body.file_id }; sheetNudge(e.message, body.body); return; }
+        if (e.data?.blocked) { toast('🚫 ' + e.message, 'warn'); return; }
+        throw e;
+      }
+    },
+    'feed-report': async (f, d) => { if (!d.get('reason')) throw new Error('Pick a reason'); await api('/reports', { method: 'POST', body: { feed_post_id: Number(d.get('feed_post_id')), reason: d.get('reason'), details: d.get('details') } }); closeSheet(); toast('🛡️ Report sent to the admins'); },
+    group: async (f, d) => {
+      const member_ids = $$('[data-act=toggle-chip][aria-pressed=true]', f).map((b) => Number(b.dataset.v));
+      if (!member_ids.length) throw new Error('Tap at least one person');
+      const expires_at = d.get('temp') === 'on' ? new Date(`${d.get('ends')}T23:59`).toISOString() : null;
+      const r = await api('/groups', { method: 'POST', body: { name: d.get('name'), member_ids, expires_at, event_id: Number(d.get('event_id')) || null } });
+      closeSheet(); toast('👥 Group created'); S.tab = 'chat'; open('thread', r.id);
+    },
+    'group-add': async (f) => { const add = $$('[data-act=toggle-chip][aria-pressed=true]', f).map((b) => Number(b.dataset.v)); if (!add.length) throw new Error('Tap someone to add'); await api(`/groups/${S.view.id}`, { method: 'PATCH', body: { add } }); closeSheet(); await loadThread(true); paint(); toast('Added!'); },
+    'hub-edit': async (f, d) => {
+      S.roster = S.roster || (await api('/members?role=student')).members;
+      const lines = (k) => String(d.get(k) || '').split('\n').map((x) => x.trim()).filter(Boolean);
+      const toTime = (t) => { const m = /^(\d{1,2}):(\d{2})\s*(am|pm)?$/i.exec(t); if (!m) return null; let h = Number(m[1]); if (m[3]) { if (/pm/i.test(m[3]) && h < 12) h += 12; if (/am/i.test(m[3]) && h === 12) h = 0; } return `${String(h).padStart(2, '0')}:${m[2]}`; };
+      const schedule = lines('schedule').map((l, i) => { const [t, ...rest] = l.split(/\s+/); const at = toTime(t); if (!at) throw new Error(`Schedule line ${i + 1} should start with a time like 14:30`); return { at_time: at, label: rest.join(' ') }; });
+      const order = lines('order').map((l) => { const us = /\*\s*$/.test(l); l = l.replace(/\*\s*$/, '').trim(); const [t, ...rest] = l.split(/\s+/); const at = toTime(t); return { perform_at: at, band_name: at ? rest.join(' ') : l, is_us: us }; });
+      const unknown = [];
+      const buses = lines('buses').map((l) => { const [name, people = ''] = l.split(':'); const r = resolvePeople(people); unknown.push(...r.unknown); return { name: name.trim(), member_ids: r.ids }; });
+      await api(`/events/${S.view.id}/hub`, { method: 'PUT', body: { schedule, order, buses } });
+      closeSheet(); toast(unknown.length ? `Saved — couldn't find: ${unknown.join(', ')}` : 'Hub saved ✅', unknown.length ? 'warn' : ''); loadForScreen();
+    },
     'thread-new': async (f, d) => { const r = await api('/channels', { method: 'POST', body: Object.fromEntries(d) }); closeSheet(); open('thread', r.id); },
     ride: async (f, d) => {
       const r = await api('/rides', { method: 'POST', body: { kind: d.get('kind'), reason: d.get('reason'), starts_at: isoFrom(d), from_place: d.get('from_place'), to_place: d.get('to_place'), seats: Number(d.get('seats')), note: d.get('note') } });
@@ -1076,6 +1375,15 @@
   document.addEventListener('change', (e) => {
     const el = e.target;
     if (el.tagName === 'INPUT' && el.type === 'checkbox' && el.dataset.act && A[el.dataset.act]) A[el.dataset.act](el, e);
+    if ((el.id === 'feed-file' || el.id === 'reply-file') && el.files?.[0]) {
+      const file = el.files[0];
+      if (!file.type.startsWith('image/')) { toast('Pick a photo', 'warn'); return; }
+      const keep = el.closest('form')?.body?.value || '';
+      if (el.id === 'feed-file') S.feedAttach = { file, name: file.name }; else S.replyAttach = { file, name: file.name };
+      paint(); const b = el.id === 'feed-file' ? $('form[data-form=feed-post] textarea') : $('#msg-input'); if (b) { b.value = keep; b.focus(); }
+      if (el.id === 'reply-file') scrollChat(true);
+      return;
+    }
     if (el.id === 'file-in' && el.files?.[0]) {
       const file = el.files[0];
       const kind = file.type === 'application/pdf' || /\.pdf$/i.test(file.name) ? 'pdf' : file.type.startsWith('image/') ? 'image' : null;

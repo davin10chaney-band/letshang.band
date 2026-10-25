@@ -350,11 +350,13 @@ add('DELETE', '/api/me', async ({ env, request, user, body }) => {
 });
 
 // ================================================================ members + blocks
-add('GET', '/api/members', async ({ env, user }) => {
-  // Students see students, parents see parents. No cross-role directory.
+add('GET', '/api/members', async ({ env, user, url }) => {
+  // Students see students, parents see parents. No cross-role directory —
+  // except admins, who can load the student roster (e.g. to fill bus lists).
+  const role = user.is_admin && url.searchParams.get('role') === 'student' ? 'student' : user.role;
   const rows = await all(env,
     `SELECT id, display_name, username, avatar, section, instrument, grade, is_admin, can_drive FROM users
-      WHERE role = ? AND status = 'active' ORDER BY section, display_name`, user.role);
+      WHERE role = ? AND status = 'active' ORDER BY section, display_name`, role);
   const blocked = new Set((await all(env, 'SELECT blocked_id FROM blocks WHERE blocker_id = ?', user.id)).map((b) => b.blocked_id));
   return json({ members: rows.map((m) => ({ ...m, blocked: blocked.has(m.id) })) });
 });
@@ -375,19 +377,19 @@ const AUD = (user) => (user.role === 'parent' ? 'parents' : 'students');
 async function visibleChannels(env, user) {
   return all(env,
     `SELECT c.* FROM channels c
-      WHERE c.archived = 0 AND c.audience = ?1
-        AND (c.kind != 'dm' OR EXISTS (SELECT 1 FROM channel_members m WHERE m.channel_id = c.id AND m.user_id = ?2))`, AUD(user), user.id);
+      WHERE c.archived = 0 AND c.audience = ?1 AND (c.expires_at IS NULL OR c.expires_at > ?3)
+        AND (c.kind != 'dm' OR EXISTS (SELECT 1 FROM channel_members m WHERE m.channel_id = c.id AND m.user_id = ?2))`, AUD(user), user.id, nowIso());
 }
 async function channelFor(env, user, id) {
   const c = await first(env, 'SELECT * FROM channels WHERE id = ?', toInt(id));
-  if (!c || c.audience !== AUD(user)) fail(404, 'Thread not found');
+  if (!c || c.audience !== AUD(user) || c.archived || (c.expires_at && c.expires_at < nowIso())) fail(404, 'Thread not found');
   if (c.kind === 'dm' && !(await first(env, 'SELECT 1 AS x FROM channel_members WHERE channel_id = ? AND user_id = ?', c.id, user.id))) fail(404, 'Thread not found');
   return c;
 }
 
 add('GET', '/api/channels', async ({ env, user }) => {
   const chans = await visibleChannels(env, user);
-  if (!chans.length) return json({ sections: [], dms: [] });
+  if (!chans.length) return json({ sections: [], dms: [], groups: [] });
   const ids = chans.map((c) => c.id);
   const ph = ids.map((_, i) => `?${i + 2}`).join(',');
   const stats = await all(env,
@@ -410,11 +412,17 @@ add('GET', '/api/channels', async ({ env, user }) => {
     topics: chans.filter((t) => t.kind === 'topic' && t.section === s.section).map(pack).sort((a, b) => (b.last_at || '').localeCompare(a.last_at || '')) }));
   const order = ['all', ...SECTIONS, 'parents'];
   sections.sort((a, b) => (a.section === user.section ? -1 : b.section === user.section ? 1 : order.indexOf(a.section) - order.indexOf(b.section)));
-  const dms = chans.filter((c) => c.kind === 'dm').map((c) => {
+  const groups = [];
+  for (const c of chans.filter((x) => x.kind === 'dm' && x.is_group)) {
+    const ms = others.filter((x) => x.channel_id === c.id);
+    groups.push({ ...pack(c), is_group: true, expires_at: c.expires_at, members: ms.map(({ id, display_name, avatar }) => ({ id, display_name, avatar })), mine: c.created_by === user.id });
+  }
+  groups.sort((a, b) => (b.last_at || '').localeCompare(a.last_at || ''));
+  const dms = chans.filter((c) => c.kind === 'dm' && !c.is_group).map((c) => {
     const o = others.find((x) => x.channel_id === c.id);
     return { ...pack(c), with: o ? { id: o.id, display_name: o.display_name, avatar: o.avatar, section: o.section } : null };
   }).filter((d) => d.with && !blocked.has(d.with.id)).sort((a, b) => (b.last_at || '').localeCompare(a.last_at || ''));
-  return json({ sections, dms });
+  return json({ sections, dms, groups });
 });
 
 // New topic thread (e.g. "Movement 2 — drill set 14"). Students: in All Band or their own section.
@@ -452,7 +460,7 @@ add('POST', '/api/dms', async ({ env, user, body }) => {
   if (await isBlocked(env, user.id, other.id)) fail(403, "You can't message this person");
   const existing = await first(env,
     `SELECT c.id FROM channels c JOIN channel_members a ON a.channel_id = c.id AND a.user_id = ? JOIN channel_members b ON b.channel_id = c.id AND b.user_id = ?
-      WHERE c.kind = 'dm'`, user.id, other.id);
+      WHERE c.kind = 'dm' AND c.is_group = 0`, user.id, other.id);
   if (existing) return json({ ok: true, id: existing.id });
   const row = await first(env, `INSERT INTO channels (kind, audience, name, created_by) VALUES ('dm', ?, 'DM', ?) RETURNING id`, AUD(user), user.id);
   await env.DB.batch([user.id, other.id].map((u) => env.DB.prepare('INSERT INTO channel_members (channel_id, user_id) VALUES (?, ?)').bind(row.id, u)));
@@ -479,8 +487,10 @@ add('GET', '/api/channels/:id/posts', async ({ env, user, params, url }) => {
     await run(env, `UPDATE notifications SET read_at = ? WHERE user_id = ? AND link = ? AND read_at IS NULL`, nowIso(), user.id, `thread:${c.id}`);
   }
   let peer = null;
-  if (c.kind === 'dm') peer = await first(env, `SELECT u.id, u.display_name, u.avatar, u.section FROM channel_members m JOIN users u ON u.id = m.user_id WHERE m.channel_id = ? AND m.user_id != ?`, c.id, user.id);
-  return json({ channel: { id: c.id, kind: c.kind, section: c.section, name: c.name, about: c.about, locked: !!c.locked, mine: c.created_by === user.id }, peer, posts: rows });
+  let members = null;
+  if (c.kind === 'dm' && !c.is_group) peer = await first(env, `SELECT u.id, u.display_name, u.avatar, u.section FROM channel_members m JOIN users u ON u.id = m.user_id WHERE m.channel_id = ? AND m.user_id != ?`, c.id, user.id);
+  if (c.is_group) members = await all(env, `SELECT u.id, u.display_name, u.avatar, u.section FROM channel_members m JOIN users u ON u.id = m.user_id WHERE m.channel_id = ? ORDER BY u.display_name`, c.id);
+  return json({ channel: { id: c.id, kind: c.kind, is_group: !!c.is_group, section: c.section, name: c.name, about: c.about, locked: !!c.locked, mine: c.created_by === user.id, expires_at: c.expires_at }, peer, members, posts: rows });
 });
 
 add('POST', '/api/channels/:id/posts', async ({ env, ctx, user, params, body }) => {
@@ -489,11 +499,12 @@ add('POST', '/api/channels/:id/posts', async ({ env, ctx, user, params, body }) 
   const text = str(body.body, 2000);
   const fileId = toInt(body.file_id);
   if (!text && !fileId) fail(400, 'Type a message or attach a file');
-  let peer = null;
-  if (c.kind === 'dm') {
+  let peer = null, groupPeople = null;
+  if (c.kind === 'dm' && !c.is_group) {
     peer = await first(env, `SELECT u.* FROM channel_members m JOIN users u ON u.id = m.user_id WHERE m.channel_id = ? AND m.user_id != ?`, c.id, user.id);
     if (!peer || peer.status !== 'active' || await isBlocked(env, user.id, peer.id)) fail(403, "You can't message this person");
   }
+  if (c.is_group) groupPeople = await all(env, `SELECT u.${userCols.split(', ').join(', u.')} FROM channel_members m JOIN users u ON u.id = m.user_id WHERE m.channel_id = ? AND m.user_id != ? AND u.status = 'active'`, c.id, user.id);
   if (fileId) {
     const f = await first(env, 'SELECT id, owner_id, deleted FROM files WHERE id = ?', fileId);
     if (!f || f.owner_id !== user.id || f.deleted) fail(400, 'That file is missing — upload it again');
@@ -505,6 +516,9 @@ add('POST', '/api/channels/:id/posts', async ({ env, ctx, user, params, body }) 
   const preview = text ? (text.length > 100 ? text.slice(0, 97) + '…' : text) : '📎 Sent a file';
   if (peer) {
     await notify(env, ctx, [peer], { type: 'dm', title: `Message from ${user.display_name}`, body: preview, link: `thread:${c.id}`, dedupe: `dm:${c.id}` });
+  } else if (groupPeople) {
+    const ok = []; for (const p of groupPeople) if (!(await isBlocked(env, user.id, p.id))) ok.push(p);
+    await notify(env, ctx, ok, { type: 'dm', title: `${c.name}: ${firstName(user.display_name)}`, body: preview, link: `thread:${c.id}`, dedupe: `dm:${c.id}` });
   } else {
     // @mentions in threads → notify those people (same audience only)
     const names = [...new Set((text.match(/@([a-z0-9._-]{3,30})/gi) || []).map((m) => m.slice(1).toLowerCase()))].slice(0, 10);
@@ -566,8 +580,13 @@ add('GET', '/api/files/:id', async ({ env, user, params, url }) => {
   if (f.owner_id !== user.id) {
     // Must be attached to a post in a thread this person can see
     const p = await first(env, `SELECT c.id FROM posts p JOIN channels c ON c.id = p.channel_id WHERE p.file_id = ? AND p.deleted_by IS NULL LIMIT 1`, f.id);
+    // Feed photos: any student (or anyone, for official updates)
+    const feed = await first(env, `SELECT 1 AS x FROM feed_posts WHERE file_id = ? AND deleted_by IS NULL AND (official = 1 OR ? = 'student')
+      UNION SELECT 1 FROM feed_replies WHERE file_id = ? AND deleted_by IS NULL AND ? = 'student' LIMIT 1`, f.id, user.role, f.id, user.role);
+    if (feed) return new Response((await env.FILES.get(f.r2_key))?.body, { headers: { 'content-type': f.mime, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff', 'content-disposition': `inline; filename="${f.name.replace(/"/g, '')}"` } });
     // Admins can open a file that was reported, so they can review it.
-    const reported = user.is_admin && await first(env, 'SELECT r.id FROM reports r JOIN posts p ON p.id = r.post_id WHERE p.file_id = ? LIMIT 1', f.id);
+    const reported = user.is_admin && await first(env, `SELECT r.id FROM reports r LEFT JOIN posts p ON p.id = r.post_id LEFT JOIN feed_posts fp ON fp.id = r.feed_post_id LEFT JOIN feed_replies fr ON fr.id = r.reply_id
+      WHERE p.file_id = ?1 OR fp.file_id = ?1 OR fr.file_id = ?1 LIMIT 1`, f.id);
     if (!reported) {
       if (!p) fail(404, 'File not found');
       await channelFor(env, user, p.id);
@@ -588,6 +607,15 @@ add('POST', '/api/reports', async ({ env, ctx, user, body }) => {
   const reasons = ['mean', 'bullying', 'inappropriate', 'photo', 'threat', 'spam', 'other'];
   const reason = reasons.includes(body.reason) ? body.reason : fail(400, 'Pick a reason');
   let postId = toInt(body.post_id), userId = toInt(body.user_id);
+  const feedId = toInt(body.feed_post_id), replyId = toInt(body.reply_id);
+  if (feedId || replyId) {
+    const t = replyId ? await first(env, 'SELECT user_id FROM feed_replies WHERE id = ?', replyId) : await feedPostFor(env, user, feedId);
+    if (!t) fail(404, 'Not found');
+    await rateLimit(env, 'report:' + user.id, 20, 864e5);
+    await run(env, 'INSERT INTO reports (reporter_id, user_id, feed_post_id, reply_id, reason, details) VALUES (?, ?, ?, ?, ?, ?)', user.id, t.user_id, feedId || null, replyId || null, reason, str(body.details, 500) || null);
+    await notify(env, ctx, await usersWhere(env, 'is_admin = 1'), { type: 'safety', title: 'New report to review', body: `Reason: ${reason}`, link: 'admin', dedupe: 'reports-open' });
+    return json({ ok: true });
+  }
   if (postId) {
     const p = await first(env, 'SELECT id, channel_id, user_id FROM posts WHERE id = ?', postId);
     if (!p) fail(404, 'Message not found');
@@ -621,7 +649,12 @@ add('GET', '/api/school-calendar', async ({ env }) => json({ days: await schoolC
 add('GET', '/api/events', async ({ env, user }) => {
   const rows = await all(env, `SELECT e.*, u.display_name AS by_name FROM events e LEFT JOIN users u ON u.id = e.created_by
      WHERE e.starts_at > ? ORDER BY e.starts_at LIMIT 100`, ago(6 * 3600e3));
-  return json({ events: rows.filter((e) => user.role === 'parent' || !e.section || e.section === user.section || user.is_admin) });
+  const visible = rows.filter((e) => user.role === 'parent' || !e.section || e.section === user.section || user.is_admin);
+  if (visible.length) {
+    const rs = await all(env, `SELECT event_id, status, user_id FROM event_rsvps WHERE event_id IN (${visible.map(() => '?').join(',')})`, ...visible.map((e) => e.id));
+    for (const e of visible) { const mine = rs.filter((r) => r.event_id === e.id); e.going = mine.filter((r) => r.status === 'going').length; e.my_rsvp = mine.find((r) => r.user_id === user.id)?.status || null; }
+  }
+  return json({ events: visible });
 });
 function eventFields(body) {
   const kinds = ['rehearsal', 'game', 'competition', 'concert', 'sectional', 'other'];
@@ -873,6 +906,237 @@ add('POST', '/api/ride-offers/:id/cancel', async ({ env, ctx, user, params }) =>
   return json({ ok: true });
 });
 
+// ================================================================ group chats
+add('POST', '/api/groups', async ({ env, ctx, user, body }) => {
+  const name = str(body.name, 50); if (!name) fail(400, 'Name the group');
+  await guardText(env, ctx, user, name, true);
+  const ids = [...new Set((Array.isArray(body.member_ids) ? body.member_ids : []).map(toInt).filter((x) => x && x !== user.id))].slice(0, 60);
+  if (!ids.length) fail(400, 'Add at least one person');
+  const people = await all(env, `SELECT id FROM users WHERE status = 'active' AND role = ? AND id IN (${ids.map(() => '?').join(',')})`, user.role, ...ids);
+  const ok = []; for (const p of people) if (!(await isBlocked(env, user.id, p.id))) ok.push(p.id);
+  if (!ok.length) fail(400, 'Add at least one person');
+  let expires = null;
+  if (body.expires_at) { const d = new Date(body.expires_at); if (isNaN(d) || d < new Date()) fail(400, 'Pick an end date in the future'); expires = d.toISOString(); }
+  await rateLimit(env, 'group:' + user.id, 10, 864e5, "That's a lot of new groups today!");
+  const row = await first(env, `INSERT INTO channels (kind, audience, name, about, created_by, is_group, expires_at, event_id, last_at) VALUES ('dm', ?, ?, ?, ?, 1, ?, ?, ?) RETURNING id`,
+    AUD(user), name, str(body.about, 120) || null, user.id, expires, toInt(body.event_id) || null, nowIso());
+  await env.DB.batch([user.id, ...ok].map((u) => env.DB.prepare('INSERT INTO channel_members (channel_id, user_id) VALUES (?, ?)').bind(row.id, u)));
+  const members = await usersWhere(env, `id IN (${ok.map(() => '?').join(',')})`, ...ok);
+  await notify(env, ctx, members, { type: 'dm', title: `${firstName(user.display_name)} added you to "${name}"`, link: `thread:${row.id}` });
+  return json({ ok: true, id: row.id });
+});
+add('PATCH', '/api/groups/:id', async ({ env, ctx, user, params, body }) => {
+  const c = await channelFor(env, user, params.id);
+  if (!c.is_group) fail(400, 'Not a group');
+  if (body.leave) { await run(env, 'DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?', c.id, user.id); return json({ ok: true }); }
+  if (c.created_by !== user.id && !user.is_admin) fail(403, 'Only the person who made the group can change it');
+  if (body.name !== undefined) { const n = str(body.name, 50); if (!n) fail(400, 'Name the group'); await guardText(env, ctx, user, n, true); await run(env, 'UPDATE channels SET name = ? WHERE id = ?', n, c.id); }
+  const add = [...new Set((body.add || []).map(toInt).filter(Boolean))];
+  if (add.length) {
+    const people = await all(env, `SELECT id FROM users WHERE status = 'active' AND role = ? AND id IN (${add.map(() => '?').join(',')})`, user.role, ...add);
+    for (const p of people) if (!(await isBlocked(env, user.id, p.id))) await run(env, 'INSERT OR IGNORE INTO channel_members (channel_id, user_id) VALUES (?, ?)', c.id, p.id);
+  }
+  for (const r of (body.remove || []).map(toInt).filter((x) => x && x !== user.id)) await run(env, 'DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?', c.id, r);
+  if (body.archived) await run(env, 'UPDATE channels SET archived = 1 WHERE id = ?', c.id);
+  return json({ ok: true });
+});
+
+// ================================================================ Band Room Feed (students; official updates also reach parents)
+const REACTIONS = ['fire', 'lol', 'dead', 'drum', 'toot', 'clap', 'salute', 'trophy', 'heart', 'encore'];
+async function feedPack(env, user, rows) {
+  if (!rows.length) return [];
+  const ids = rows.map((r) => r.id), ph = ids.map(() => '?').join(',');
+  const [reacts, mine, replies, opts, votes, myVotes] = await Promise.all([
+    all(env, `SELECT post_id, emoji, COUNT(*) AS n FROM feed_reactions WHERE post_id IN (${ph}) GROUP BY post_id, emoji`, ...ids),
+    all(env, `SELECT post_id, emoji FROM feed_reactions WHERE user_id = ? AND post_id IN (${ph})`, user.id, ...ids),
+    all(env, `SELECT post_id, COUNT(*) AS n FROM feed_replies WHERE deleted_by IS NULL AND post_id IN (${ph}) GROUP BY post_id`, ...ids),
+    all(env, `SELECT id, post_id, label FROM poll_options WHERE post_id IN (${ph}) ORDER BY position`, ...ids),
+    all(env, `SELECT v.post_id, v.option_id, u.id, u.display_name, u.avatar FROM poll_votes v JOIN users u ON u.id = v.user_id WHERE v.post_id IN (${ph})`, ...ids),
+    all(env, `SELECT post_id, option_id FROM poll_votes WHERE user_id = ? AND post_id IN (${ph})`, user.id, ...ids),
+  ]);
+  return rows.map((r) => {
+    const reactions = {};
+    for (const x of reacts.filter((x) => x.post_id === r.id)) reactions[x.emoji] = { n: x.n, mine: mine.some((m) => m.post_id === r.id && m.emoji === x.emoji) };
+    let poll = null;
+    if (r.kind !== 'post') {
+      const vs = votes.filter((v) => v.post_id === r.id);
+      poll = { show_voters: !!r.show_voters, total: vs.length, my_vote: myVotes.find((v) => v.post_id === r.id)?.option_id || null,
+        options: opts.filter((o) => o.post_id === r.id).map((o) => ({ id: o.id, label: o.label, n: vs.filter((v) => v.option_id === o.id).length,
+          voters: r.show_voters ? vs.filter((v) => v.option_id === o.id).map(({ id, display_name, avatar }) => ({ id, display_name, avatar })) : undefined })) };
+    }
+    return { id: r.id, kind: r.kind, body: r.deleted_by ? '' : r.body, deleted: !!r.deleted_by, created_at: r.created_at, official: !!r.official, event_id: r.event_id,
+      author: r.user_id ? { id: r.user_id, display_name: r.display_name, avatar: r.avatar, section: r.section, admin: !!r.is_admin } : null,
+      file: r.file_id && !r.deleted_by && !r.file_deleted ? { id: r.file_id, name: r.file_name, kind: r.file_kind, size: r.file_size } : null,
+      reactions, replies: replies.find((x) => x.post_id === r.id)?.n || 0, poll, mine: r.user_id === user.id };
+  });
+}
+const feedCols = `p.*, u.display_name, u.avatar, u.section, u.is_admin, f.name AS file_name, f.kind AS file_kind, f.size AS file_size, f.deleted AS file_deleted`;
+add('GET', '/api/feed', async ({ env, user, url }) => {
+  const before = toInt(url.searchParams.get('before')) || 1e12;
+  const ev = toInt(url.searchParams.get('event_id'));
+  const blocked = (await all(env, 'SELECT blocked_id FROM blocks WHERE blocker_id = ?', user.id)).map((b) => b.blocked_id);
+  const where = [`p.id < ?`, `p.deleted_by IS NULL`];
+  const b = [before];
+  if (ev) { where.push('p.event_id = ?'); b.push(ev); }
+  if (user.role === 'parent') where.push('p.official = 1');   // parents only see official band updates
+  if (blocked.length) { where.push(`(p.user_id IS NULL OR p.user_id NOT IN (${blocked.map(() => '?').join(',')}))`); b.push(...blocked); }
+  const rows = await all(env, `SELECT ${feedCols} FROM feed_posts p LEFT JOIN users u ON u.id = p.user_id LEFT JOIN files f ON f.id = p.file_id
+    WHERE ${where.join(' AND ')} ORDER BY p.id DESC LIMIT 25`, ...b);
+  return json({ posts: await feedPack(env, user, rows), reactions: REACTIONS });
+});
+add('POST', '/api/feed', async ({ env, ctx, user, body }) => {
+  const official = user.is_admin && bool(body.official);
+  if (user.role === 'parent' && !official) fail(403, 'The feed is for students — admins can post official updates');
+  const kind = ['post', 'poll', 'ask'].includes(body.kind) ? body.kind : 'post';
+  const text = str(body.body, 1500);
+  const fileId = toInt(body.file_id);
+  if (!text && !fileId) fail(400, 'Write something or add a photo');
+  if (fileId) { const f = await first(env, 'SELECT owner_id, deleted, kind FROM files WHERE id = ?', fileId); if (!f || f.owner_id !== user.id || f.deleted) fail(400, 'That photo is missing — add it again'); }
+  let options = [];
+  if (kind === 'poll') {
+    options = (Array.isArray(body.options) ? body.options : []).map((o) => str(o, 60)).filter(Boolean).slice(0, 6);
+    if (options.length < 2) fail(400, 'A poll needs at least 2 choices');
+  }
+  if (kind === 'ask') options = ["I'm in", 'Maybe'];
+  const ev = toInt(body.event_id) ? await first(env, 'SELECT id FROM events WHERE id = ?', toInt(body.event_id)) : null;
+  await rateLimit(env, 'feed:' + user.id, 30, 3600e3, "That's a lot of posts — take a breath!");
+  const g = await guardText(env, ctx, user, `${text} ${options.join(' ')}`, body.confirm);
+  const row = await first(env, 'INSERT INTO feed_posts (user_id, kind, body, file_id, event_id, official, show_voters) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id',
+    user.id, kind, text, fileId || null, ev?.id || null, official ? 1 : 0, kind === 'ask' ? 1 : 0);
+  if (options.length) await env.DB.batch(options.map((o, i) => env.DB.prepare('INSERT INTO poll_options (post_id, label, position) VALUES (?, ?, ?)').bind(row.id, o, i)));
+  if (official) {
+    const everyone = (await usersWhere(env, '1 = 1')).filter((u) => u.id !== user.id);
+    await notify(env, ctx, everyone, { type: 'event', title: `📣 Band update`, body: text.slice(0, 120), link: ev ? `hub:${ev.id}` : 'feed' });
+  }
+  return json({ ok: true, id: row.id, support: g.selfHarm ? SUPPORT : undefined });
+});
+async function feedPostFor(env, user, id) {
+  const p = await first(env, 'SELECT * FROM feed_posts WHERE id = ?', toInt(id));
+  if (!p || p.deleted_by) fail(404, 'Post not found');
+  if (user.role === 'parent' && !p.official) fail(404, 'Post not found');
+  return p;
+}
+add('DELETE', '/api/feed/:id', async ({ env, user, params }) => {
+  const p = await feedPostFor(env, user, params.id);
+  if (p.user_id !== user.id && !user.is_admin) fail(403, 'You can only delete your own posts');
+  await run(env, 'UPDATE feed_posts SET deleted_by = ? WHERE id = ?', user.id, p.id);
+  if (p.file_id) await run(env, 'UPDATE files SET deleted = 1 WHERE id = ?', p.file_id);
+  return json({ ok: true });
+});
+add('POST', '/api/feed/:id/react', async ({ env, user, params, body }) => {
+  const p = await feedPostFor(env, user, params.id);
+  if (!REACTIONS.includes(body.emoji)) fail(400, 'Pick a reaction');
+  const had = await first(env, 'SELECT 1 AS x FROM feed_reactions WHERE post_id = ? AND user_id = ? AND emoji = ?', p.id, user.id, body.emoji);
+  if (had) await run(env, 'DELETE FROM feed_reactions WHERE post_id = ? AND user_id = ? AND emoji = ?', p.id, user.id, body.emoji);
+  else await run(env, 'INSERT INTO feed_reactions (post_id, user_id, emoji) VALUES (?, ?, ?)', p.id, user.id, body.emoji);
+  return json({ ok: true, on: !had });
+});
+add('POST', '/api/feed/:id/vote', async ({ env, ctx, user, params, body }) => {
+  const p = await feedPostFor(env, user, params.id);
+  if (p.kind === 'post') fail(400, 'Not a poll');
+  const opt = await first(env, 'SELECT id FROM poll_options WHERE id = ? AND post_id = ?', toInt(body.option_id), p.id);
+  if (!opt) fail(400, 'Pick a choice');
+  await run(env, 'INSERT INTO poll_votes (post_id, user_id, option_id) VALUES (?, ?, ?) ON CONFLICT(post_id, user_id) DO UPDATE SET option_id = excluded.option_id', p.id, user.id, opt.id);
+  if (p.kind === 'ask' && p.user_id && p.user_id !== user.id) {
+    const [author] = await usersWhere(env, 'id = ?', p.user_id);
+    await notify(env, ctx, [author], { type: 'hangout', title: `${firstName(user.display_name)} answered your ask`, body: p.body.slice(0, 80), link: `post:${p.id}`, dedupe: `ask:${p.id}` });
+  }
+  return json({ ok: true });
+});
+add('GET', '/api/feed/:id/replies', async ({ env, user, params }) => {
+  const p = await feedPostFor(env, user, params.id);
+  const blocked = new Set((await all(env, 'SELECT blocked_id FROM blocks WHERE blocker_id = ?', user.id)).map((b) => b.blocked_id));
+  const rows = await all(env, `SELECT r.id, r.body, r.created_at, r.user_id, r.deleted_by, u.display_name, u.avatar, u.section, u.is_admin, f.id AS file_id, f.name AS file_name, f.kind AS file_kind, f.size AS file_size
+    FROM feed_replies r LEFT JOIN users u ON u.id = r.user_id LEFT JOIN files f ON f.id = r.file_id WHERE r.post_id = ? ORDER BY r.id LIMIT 300`, p.id);
+  const [post] = await feedPack(env, user, await all(env, `SELECT ${feedCols} FROM feed_posts p LEFT JOIN users u ON u.id = p.user_id LEFT JOIN files f ON f.id = p.file_id WHERE p.id = ?`, p.id));
+  return json({ post, replies: rows.filter((r) => !blocked.has(r.user_id)).map((r) => ({ id: r.id, created_at: r.created_at, deleted: !!r.deleted_by, body: r.deleted_by ? '' : r.body,
+    author: r.user_id ? { id: r.user_id, display_name: r.display_name, avatar: r.avatar, section: r.section, admin: !!r.is_admin } : null,
+    file: r.file_id && !r.deleted_by ? { id: r.file_id, name: r.file_name, kind: r.file_kind, size: r.file_size } : null, mine: r.user_id === user.id })) });
+});
+add('POST', '/api/feed/:id/replies', async ({ env, ctx, user, params, body }) => {
+  const p = await feedPostFor(env, user, params.id);
+  if (user.role === 'parent') fail(403, 'Replies are for students');
+  const text = str(body.body, 1000), fileId = toInt(body.file_id);
+  if (!text && !fileId) fail(400, 'Write a reply or add a photo');
+  if (fileId) { const f = await first(env, 'SELECT owner_id, deleted FROM files WHERE id = ?', fileId); if (!f || f.owner_id !== user.id || f.deleted) fail(400, 'That photo is missing — add it again'); }
+  await rateLimit(env, 'reply:' + user.id, 60, 3600e3);
+  const g = await guardText(env, ctx, user, text, body.confirm);
+  const row = await first(env, 'INSERT INTO feed_replies (post_id, user_id, body, file_id) VALUES (?, ?, ?, ?) RETURNING id', p.id, user.id, text, fileId || null);
+  if (p.user_id && p.user_id !== user.id && !(await isBlocked(env, user.id, p.user_id))) {
+    const [author] = await usersWhere(env, 'id = ?', p.user_id);
+    await notify(env, ctx, [author], { type: 'mention', title: `${firstName(user.display_name)} replied to your post`, body: (text || '📷 Photo').slice(0, 100), link: `post:${p.id}`, dedupe: `reply:${p.id}` });
+  }
+  return json({ ok: true, id: row.id, support: g.selfHarm ? SUPPORT : undefined });
+});
+add('DELETE', '/api/replies/:id', async ({ env, user, params }) => {
+  const r = await first(env, 'SELECT id, user_id, file_id FROM feed_replies WHERE id = ?', toInt(params.id));
+  if (!r) fail(404, 'Not found');
+  if (r.user_id !== user.id && !user.is_admin) fail(403, 'You can only delete your own replies');
+  await run(env, 'UPDATE feed_replies SET deleted_by = ? WHERE id = ?', user.id, r.id);
+  return json({ ok: true });
+});
+
+// ================================================================ Competition Day Hub + "Who's going?"
+add('GET', '/api/events/:id/hub', async ({ env, user, params }) => {
+  const e = await first(env, 'SELECT * FROM events WHERE id = ?', toInt(params.id));
+  if (!e) fail(404, 'Event not found');
+  const [schedule, buses, riders, order, rsvps] = await Promise.all([
+    all(env, 'SELECT id, at_time, label FROM event_schedule WHERE event_id = ? ORDER BY at_time, position', e.id),
+    all(env, 'SELECT id, name, notes FROM event_buses WHERE event_id = ? ORDER BY position, id', e.id),
+    all(env, `SELECT r.bus_id, u.id, u.display_name, u.avatar, u.section FROM event_bus_riders r JOIN event_buses b ON b.id = r.bus_id JOIN users u ON u.id = r.user_id WHERE b.event_id = ? ORDER BY u.display_name`, e.id),
+    all(env, 'SELECT position, band_name, perform_at, is_us FROM event_order WHERE event_id = ? ORDER BY position', e.id),
+    all(env, `SELECT r.status, u.id, u.display_name, u.avatar, u.section, u.role FROM event_rsvps r JOIN users u ON u.id = r.user_id WHERE r.event_id = ?`, e.id),
+  ]);
+  const myBus = riders.find((r) => r.id === user.id)?.bus_id || null;
+  // Students see who's going (students only); parents see counts.
+  const going = rsvps.filter((r) => r.status === 'going' && r.role === 'student');
+  return json({
+    event: e, schedule, order, my_rsvp: rsvps.find((r) => r.id === user.id)?.status || null, my_bus: myBus,
+    buses: buses.map((b) => ({ ...b, riders: riders.filter((r) => r.bus_id === b.id).map(({ id, display_name, avatar, section }) => ({ id, display_name, avatar, section })) })),
+    going: user.role === 'student' ? going.map(({ id, display_name, avatar, section }) => ({ id, display_name, avatar, section })) : [],
+    counts: { going: going.length, maybe: rsvps.filter((r) => r.status === 'maybe').length },
+  });
+});
+add('POST', '/api/events/:id/rsvp', async ({ env, user, params, body }) => {
+  const e = await first(env, 'SELECT id FROM events WHERE id = ? AND cancelled = 0', toInt(params.id));
+  if (!e) fail(404, 'Event not found');
+  const status = ['going', 'maybe', 'no'].includes(body.status) ? body.status : fail(400, 'Going, maybe or no?');
+  await run(env, `INSERT INTO event_rsvps (event_id, user_id, status) VALUES (?, ?, ?) ON CONFLICT(event_id, user_id) DO UPDATE SET status = excluded.status`, e.id, user.id, status);
+  return json({ ok: true });
+});
+add('PUT', '/api/events/:id/hub', async ({ env, params, body }) => {
+  const e = await first(env, 'SELECT id FROM events WHERE id = ?', toInt(params.id));
+  if (!e) fail(404, 'Event not found');
+  const stmts = [];
+  if (Array.isArray(body.schedule)) {
+    stmts.push(env.DB.prepare('DELETE FROM event_schedule WHERE event_id = ?').bind(e.id));
+    body.schedule.slice(0, 40).forEach((it, i) => {
+      const at = String(it.at_time || ''); const label = str(it.label, 80);
+      if (!TIME_RE.test(at) || !label) fail(400, `Schedule line ${i + 1}: use a time like 14:30 and a description`);
+      stmts.push(env.DB.prepare('INSERT INTO event_schedule (event_id, at_time, label, position) VALUES (?, ?, ?, ?)').bind(e.id, at, label, i));
+    });
+  }
+  if (Array.isArray(body.order)) {
+    stmts.push(env.DB.prepare('DELETE FROM event_order WHERE event_id = ?').bind(e.id));
+    body.order.slice(0, 60).forEach((it, i) => {
+      const name = str(it.band_name, 80); if (!name) fail(400, `Performance order line ${i + 1} needs a band name`);
+      const at = it.perform_at && TIME_RE.test(it.perform_at) ? it.perform_at : null;
+      stmts.push(env.DB.prepare('INSERT INTO event_order (event_id, position, band_name, perform_at, is_us) VALUES (?, ?, ?, ?, ?)').bind(e.id, i + 1, name, at, bool(it.is_us)));
+    });
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+  if (Array.isArray(body.buses)) {
+    await run(env, 'DELETE FROM event_buses WHERE event_id = ?', e.id);
+    for (const [i, bus] of body.buses.slice(0, 20).entries()) {
+      const name = str(bus.name, 40) || `Bus ${i + 1}`;
+      const row = await first(env, 'INSERT INTO event_buses (event_id, name, notes, position) VALUES (?, ?, ?, ?) RETURNING id', e.id, name, str(bus.notes, 120) || null, i);
+      const ids = [...new Set((bus.member_ids || []).map(toInt).filter(Boolean))];
+      if (ids.length) await env.DB.batch(ids.map((u) => env.DB.prepare('INSERT OR IGNORE INTO event_bus_riders (bus_id, user_id) SELECT ?, id FROM users WHERE id = ?').bind(row.id, u)));
+    }
+  }
+  return json({ ok: true });
+}, { admin: true });
+
 // ================================================================ notifications
 add('GET', '/api/notifications', async ({ env, user }) => json({ notifications: await all(env, 'SELECT id, type, title, body, link, read_at, created_at FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 100', user.id) }));
 add('POST', '/api/notifications/read', async ({ env, user, body }) => {
@@ -888,9 +1152,13 @@ add('GET', '/api/admin', async ({ env }) => {
   const members = await all(env, `SELECT id, role, is_admin, status, display_name, username, avatar, section, instrument, grade, can_drive, created_at FROM users ORDER BY role DESC, section, display_name`);
   const reports = await all(env,
     `SELECT r.id, r.reason, r.details, r.status, r.created_at, r.post_id, a.display_name AS reporter_name, b.display_name AS reported_name, b.id AS reported_id,
-            p.body AS post_body, p.deleted_by AS post_deleted, c.name AS channel_name, f.name AS file_name, f.id AS file_id
+            COALESCE(p.body, fp.body, fr.body) AS post_body, COALESCE(p.deleted_by, fp.deleted_by, fr.deleted_by) AS post_deleted,
+            CASE WHEN r.feed_post_id IS NOT NULL THEN 'Band Room Feed' WHEN r.reply_id IS NOT NULL THEN 'Feed reply' ELSE c.name END AS channel_name,
+            f.name AS file_name, f.id AS file_id, r.feed_post_id, r.reply_id
        FROM reports r LEFT JOIN users a ON a.id = r.reporter_id LEFT JOIN users b ON b.id = r.user_id
-       LEFT JOIN posts p ON p.id = r.post_id LEFT JOIN channels c ON c.id = p.channel_id LEFT JOIN files f ON f.id = p.file_id
+       LEFT JOIN posts p ON p.id = r.post_id LEFT JOIN channels c ON c.id = p.channel_id
+       LEFT JOIN feed_posts fp ON fp.id = r.feed_post_id LEFT JOIN feed_replies fr ON fr.id = r.reply_id
+       LEFT JOIN files f ON f.id = COALESCE(p.file_id, fp.file_id, fr.file_id)
       ORDER BY (r.status = 'open') DESC, r.id DESC LIMIT 60`);
   const guard = await all(env, `SELECT kind, COUNT(*) AS n FROM guard_events WHERE created_at > ? GROUP BY kind`, ago(7 * 864e5));
   return json({ codes, settings: s, members, reports, guard_week: Object.fromEntries(guard.map((g) => [g.kind, g.n])) });
@@ -914,7 +1182,10 @@ add('PATCH', '/api/admin/users/:id', async ({ env, user, params, body }) => {
 add('POST', '/api/admin/reports/:id/resolve', async ({ env, user, params, body }) => {
   const r = await first(env, 'SELECT id, post_id FROM reports WHERE id = ?', toInt(params.id));
   if (!r) fail(404, 'Not found');
+  const rr = await first(env, 'SELECT feed_post_id, reply_id FROM reports WHERE id = ?', r.id);
   if (body.remove_post && r.post_id) await run(env, 'UPDATE posts SET body = ?, deleted_by = ? WHERE id = ?', '', user.id, r.post_id);
+  if (body.remove_post && rr.feed_post_id) await run(env, 'UPDATE feed_posts SET deleted_by = ? WHERE id = ?', user.id, rr.feed_post_id);
+  if (body.remove_post && rr.reply_id) await run(env, 'UPDATE feed_replies SET deleted_by = ? WHERE id = ?', user.id, rr.reply_id);
   await run(env, `UPDATE reports SET status = 'resolved', resolved_by = ? WHERE id = ?`, user.id, r.id);
   return json({ ok: true });
 }, { admin: true });

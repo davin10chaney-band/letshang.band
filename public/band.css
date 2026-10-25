@@ -168,3 +168,83 @@ html[data-theme="pastel"] .stk-note.on { background: #fff0b3; color: var(--p-ink
 html[data-theme="pastel"] .tuner-meter { border-color: var(--p-lav); }
 html[data-theme="pastel"] .trainer-grid input { background: #fff; color: var(--p-ink); border-color: var(--p-lav); }
 html[data-theme="pastel"] .guard-grid div { background: var(--p-lav); }
+
+/* ======== Round 2: feed, polls, reactions, hub ======== */
+.f-compose textarea { min-height: 70px; }
+.poll-fields { display: grid; gap: 8px; }
+.poll-fields[hidden] { display: none; }
+.fpost { padding: 14px 16px; border-radius: 22px; background: #12002b; border: 2px solid rgba(255, 255, 255, .14); box-shadow: 5px 6px 0 #000; margin-bottom: 14px; }
+.fpost.official { border-color: var(--yellow); }
+.fpost header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.fpost header .ava { width: 40px; height: 40px; font-size: 21px; }
+.fpost header .grow { display: flex; flex-direction: column; min-width: 0; }
+.fpost .p-more { background: none; border: 0; color: inherit; opacity: .55; cursor: pointer; padding: 4px; }
+.fpost .p-more svg { width: 20px; height: 20px; }
+.f-body { margin: 4px 0 8px; font-size: 17px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.f-photo { width: 100%; max-height: 520px; object-fit: cover; border-radius: 16px; border: 2px solid rgba(255, 255, 255, .15); margin: 4px 0 8px; background: #1b0040; min-height: 120px; }
+.ask-tag { display: inline-block; font-size: 12px; font-weight: 900; letter-spacing: 1px; text-transform: uppercase; color: var(--cyan); margin-bottom: 2px; }
+.react-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.react { display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; border-radius: 999px; border: 2px solid rgba(255, 255, 255, .2); background: rgba(255, 255, 255, .06); color: inherit; font: inherit; font-weight: 900; font-size: 14px; cursor: pointer; }
+.react span { font-size: 17px; }
+.react.on { border-color: var(--pink); background: rgba(255, 22, 199, .2); }
+.react.add { opacity: .8; }
+.react-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.react-big { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 6px; border-radius: 16px; border: 2px solid rgba(255, 255, 255, .2); background: #1b0040; color: inherit; font: inherit; font-weight: 800; font-size: 13px; cursor: pointer; }
+.react-big span { font-size: 30px; }
+.replies-link { margin-top: 8px; display: inline-block; }
+.poll { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+.poll-opt { position: relative; display: flex; align-items: center; gap: 8px; min-height: 46px; padding: 10px 14px; border-radius: 14px; border: 2px solid rgba(255, 255, 255, .25); background: transparent; color: inherit; font: inherit; font-weight: 800; text-align: left; cursor: pointer; overflow: hidden; }
+.poll-opt .bar { position: absolute; inset: 0 auto 0 0; background: rgba(0, 234, 255, .22); transition: width .4s ease; }
+.poll-opt.mine { border-color: var(--cyan); }
+.poll-opt .lbl, .poll-opt .pct, .poll-opt .voters { position: relative; }
+.poll-opt .lbl { flex: 1; }
+.poll-opt .voters { display: flex; }
+.poll-opt .voters .ava { width: 24px; height: 24px; font-size: 13px; margin-left: -6px; }
+.poll.ask .poll-opt .bar { background: rgba(25, 245, 138, .2); }
+.chat-seg { margin-bottom: 12px; }
+.countdown-card { display: block; width: 100%; text-align: left; margin-bottom: 14px; padding: 18px; border-radius: 24px; border: 3px solid #fff; color: #fff; cursor: pointer; font: inherit;
+  background: linear-gradient(120deg, #ff16c7, #8b00ff 55%, #1478ff); box-shadow: 6px 7px 0 #000; }
+.countdown-card .cd-label { font-size: 12px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; opacity: .9; }
+.countdown-card .cd-title { display: block; font-family: var(--display, 'Bangers'), sans-serif; font-weight: 400; font-size: 28px; letter-spacing: .5px; margin: 2px 0; }
+.countdown-card .cd-time { display: block; font-family: var(--display, 'Bangers'), sans-serif; font-size: 44px; line-height: 1; color: var(--yellow); text-shadow: 3px 3px 0 #000; font-variant-numeric: tabular-nums; }
+.countdown-card .cd-sub { display: block; font-size: 14px; font-weight: 700; margin-top: 4px; }
+.ev-link { font: inherit; text-align: left; color: inherit; text-decoration: none; }
+.hub-hero { text-align: center; padding: 20px 16px; border-radius: 26px; margin-bottom: 14px; color: #fff; border: 3px solid #fff; box-shadow: 6px 7px 0 #000; background: linear-gradient(140deg, #8b00ff, #ff16c7 60%, #ff7a00); }
+.hub-hero h2 { font-size: 34px; margin: 0 0 4px; }
+.hub-hero p { margin: 4px 0; font-weight: 700; }
+.cd-big { font-family: var(--display, 'Bangers'), sans-serif; font-size: 60px; line-height: 1; color: var(--yellow); text-shadow: 4px 4px 0 #000; margin: 10px 0 6px; font-variant-numeric: tabular-nums; }
+.call-time, .my-bus { display: inline-block; margin: 6px 4px 0; padding: 8px 14px; border-radius: 999px; background: rgba(0, 0, 0, .35); font-weight: 800; }
+.timeline { list-style: none; margin: 0; padding: 0 0 0 4px; border-left: 3px solid var(--cyan); }
+.timeline li { display: grid; grid-template-columns: 92px 1fr; gap: 8px; padding: 8px 0 8px 14px; position: relative; }
+.timeline li::before { content: ''; position: absolute; left: -9px; top: 13px; width: 13px; height: 13px; border-radius: 50%; background: var(--cyan); border: 2px solid #fff; }
+.perf-order { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.perf-order li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, .06); }
+.perf-order li.us { background: var(--yellow); color: #10002a; font-weight: 900; }
+.perf-order .pos { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: rgba(255, 255, 255, .15); font-weight: 900; }
+.perf-order li.us .pos { background: #10002a; color: var(--yellow); }
+.bus { padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, .05); }
+.bus.mine { outline: 2px solid var(--yellow); }
+.bus summary { cursor: pointer; }
+textarea.mono { font-family: ui-monospace, Menlo, monospace; font-size: 14px; }
+@media (prefers-reduced-motion: reduce) { .poll-opt .bar { transition: none; } }
+
+html[data-theme="pastel"] .fpost { background: rgba(255, 255, 255, .92); color: var(--p-ink); border-color: #fff; box-shadow: var(--p-shadow); }
+html[data-theme="pastel"] .fpost.official { box-shadow: var(--p-shadow), 0 0 0 3px #fff0b3; }
+html[data-theme="pastel"] .ask-tag { color: var(--p-lav-d); }
+html[data-theme="pastel"] .react { background: #fff; border-color: var(--p-lav); color: var(--p-ink); }
+html[data-theme="pastel"] .react.on { background: var(--p-pink); border-color: var(--p-pink-d); }
+html[data-theme="pastel"] .react-big { background: #fff; border-color: var(--p-lav); color: var(--p-ink); }
+html[data-theme="pastel"] .poll-opt { border-color: var(--p-lav); color: var(--p-ink); }
+html[data-theme="pastel"] .poll-opt .bar { background: var(--p-blue); }
+html[data-theme="pastel"] .poll.ask .poll-opt .bar { background: var(--p-mint); }
+html[data-theme="pastel"] .poll-opt.mine { border-color: var(--p-lav-d); }
+html[data-theme="pastel"] .countdown-card, html[data-theme="pastel"] .hub-hero { background: linear-gradient(120deg, #d9c8ff, #ffc8de 55%, #c6e6ff); color: var(--p-ink); border-color: #fff; box-shadow: var(--p-shadow); }
+html[data-theme="pastel"] .countdown-card .cd-title, html[data-theme="pastel"] .hub-hero h2 { font-family: var(--serif); font-style: italic; }
+html[data-theme="pastel"] .countdown-card .cd-time, html[data-theme="pastel"] .cd-big { color: var(--p-ink); text-shadow: none; font-family: var(--serif); font-style: italic; }
+html[data-theme="pastel"] .call-time, html[data-theme="pastel"] .my-bus { background: rgba(255, 255, 255, .7); }
+html[data-theme="pastel"] .timeline { border-color: var(--p-lav-d); }
+html[data-theme="pastel"] .timeline li::before { background: var(--p-lav-d); }
+html[data-theme="pastel"] .perf-order li { background: var(--p-lav); }
+html[data-theme="pastel"] .perf-order li.us { background: #fff0b3; }
+html[data-theme="pastel"] .bus { background: var(--p-lav); }
+html[data-theme="pastel"] .f-photo { border-color: #fff; background: var(--p-lav); }
