@@ -1,0 +1,41 @@
+-- RHS Bands important dates, Oct 2026 - Mar 2027 (from the band calendar PDF).
+-- All-day events start 8:00 AM local so countdowns work, and end 5:00 PM on their last day.
+-- No-school days and conferences were already in school_calendar, so they are not repeated here.
+ALTER TABLE events ADD COLUMN all_day INTEGER NOT NULL DEFAULT 0;
+
+INSERT INTO events (title, kind, starts_at, ends_at, location, all_day) VALUES
+  ('Night Rehearsal', 'rehearsal', '2026-10-01T22:00:00.000Z', NULL, NULL, 0),
+  ('Homecoming', 'game', '2026-10-02T22:00:00.000Z', NULL, NULL, 0),
+  ('Festival of Bands', 'competition', '2026-10-03T13:00:00.000Z', '2026-10-03T22:00:00.000Z', NULL, 1),
+  ('BPA meeting', 'other', '2026-10-05T23:00:00.000Z', NULL, NULL, 0),
+  ('Night Rehearsal', 'rehearsal', '2026-10-06T21:00:00.000Z', NULL, NULL, 0),
+  ('Night Rehearsal', 'rehearsal', '2026-10-08T22:00:00.000Z', NULL, NULL, 0),
+  ('Youth in Music', 'competition', '2026-10-09T13:00:00.000Z', '2026-10-10T22:00:00.000Z', 'U.S. Bank Stadium, Minneapolis, MN', 1),
+  ('Night Rehearsal', 'rehearsal', '2026-10-15T22:00:00.000Z', NULL, NULL, 0),
+  ('Football game', 'game', '2026-10-16T22:00:00.000Z', NULL, NULL, 0),
+  ('Quad State Competition', 'competition', '2026-10-17T13:00:00.000Z', '2026-10-17T22:00:00.000Z', NULL, 1),
+  ('Indoor Show', 'concert', '2026-10-20T22:00:00.000Z', NULL, NULL, 0),
+  ('Indoor Matinee', 'concert', '2026-10-22T19:00:00.000Z', NULL, NULL, 0),
+  ('Indoor Show', 'concert', '2026-10-23T00:00:00.000Z', NULL, NULL, 0),
+  ('Mini golf @ Pirates', 'other', '2026-10-30T21:00:00.000Z', NULL, 'Pirates mini golf', 0),
+  ('BPA meeting', 'other', '2026-11-10T00:00:00.000Z', NULL, NULL, 0),
+  ('Augustana Band Festival', 'competition', '2026-11-13T14:00:00.000Z', '2026-11-14T23:00:00.000Z', 'Augustana University, 2001 S Summit Ave, Sioux Falls, SD', 1),
+  ('Jazz & Desserts', 'concert', '2026-11-24T01:00:00.000Z', NULL, NULL, 0),
+  ('Winter Concert', 'concert', '2026-12-08T01:00:00.000Z', NULL, NULL, 0),
+  ('Winter Concert', 'concert', '2026-12-09T01:00:00.000Z', NULL, NULL, 0),
+  ('Middle school tour', 'other', '2026-12-18T14:00:00.000Z', '2026-12-18T23:00:00.000Z', NULL, 1),
+  ('USD pep band', 'game', '2027-01-07T23:00:00.000Z', NULL, NULL, 0),
+  ('Double Header', 'game', '2027-01-08T23:30:00.000Z', NULL, NULL, 0),
+  ('All-State Band Auditions', 'competition', '2027-01-14T14:00:00.000Z', '2027-01-16T23:00:00.000Z', 'Augustana University, 1110 W 33rd St, Sioux Falls, SD', 1),
+  ('Double Header', 'game', '2027-01-22T23:30:00.000Z', NULL, NULL, 0),
+  ('Solo/Ensemble Contest', 'competition', '2027-02-02T14:00:00.000Z', '2027-02-02T23:00:00.000Z', NULL, 1),
+  ('Morningside Jazz', 'competition', '2027-02-05T14:00:00.000Z', '2027-02-05T23:00:00.000Z', NULL, 1),
+  ('Mitchell Jazz', 'competition', '2027-02-09T14:00:00.000Z', '2027-02-09T23:00:00.000Z', NULL, 1),
+  ('Double Header', 'game', '2027-02-19T23:30:00.000Z', NULL, NULL, 0),
+  ('K-scope', 'rehearsal', '2027-02-24T21:30:00.000Z', NULL, NULL, 0),
+  ('Kaleidoscope', 'concert', '2027-02-26T01:00:00.000Z', NULL, NULL, 0),
+  ('Double Header', 'game', '2027-02-26T23:30:00.000Z', NULL, NULL, 0),
+  ('Augie Jazz Fest', 'competition', '2027-03-02T14:00:00.000Z', '2027-03-02T23:00:00.000Z', NULL, 1),
+  ('Chamber Ensemble', 'concert', '2027-03-17T00:00:00.000Z', NULL, NULL, 0),
+  ('Coyote Jazz', 'competition', '2027-03-23T13:00:00.000Z', '2027-03-23T22:00:00.000Z', NULL, 1),
+  ('Large Group Contest', 'competition', '2027-03-31T13:00:00.000Z', '2027-03-31T22:00:00.000Z', NULL, 1);

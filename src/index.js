@@ -32,7 +32,7 @@ const when = (env, iso) => new Intl.DateTimeFormat('en-US', { timeZone: TZ(env),
 const USERNAME_RE = /^[a-z0-9._-]{3,30}$/;
 const SECTIONS = ['percussion', 'brass', 'woodwinds', 'guard', 'front', 'leadership'];
 const AVATARS = ['drum', 'trumpet', 'sax', 'flute', 'violin', 'guitar', 'notes', 'headphones', 'flag', 'star', 'fox', 'cat', 'frog', 'panda', 'fire', 'bolt', 'crown', 'rocket', 'rainbow', 'alien'];
-const THEMES = ['neon', 'pastel'];
+const THEMES = ['cardinal', 'stadium', 'program'];
 const MAX_FILE = 15 * 1024 * 1024;
 
 async function rateLimit(env, key, limit, windowMs, message) {
@@ -648,7 +648,7 @@ add('GET', '/api/school-calendar', async ({ env }) => json({ days: await schoolC
 // ================================================================ band events (rehearsals, games, competitions)
 add('GET', '/api/events', async ({ env, user }) => {
   const rows = await all(env, `SELECT e.*, u.display_name AS by_name FROM events e LEFT JOIN users u ON u.id = e.created_by
-     WHERE e.starts_at > ? ORDER BY e.starts_at LIMIT 100`, ago(6 * 3600e3));
+     WHERE COALESCE(e.ends_at, e.starts_at) > ? ORDER BY e.starts_at LIMIT 100`, ago(6 * 3600e3));
   const visible = rows.filter((e) => user.role === 'parent' || !e.section || e.section === user.section || user.is_admin);
   if (visible.length) {
     const rs = await all(env, `SELECT event_id, status, user_id FROM event_rsvps WHERE event_id IN (${visible.map(() => '?').join(',')})`, ...visible.map((e) => e.id));
@@ -665,12 +665,12 @@ function eventFields(body) {
   if (body.call_time && !TIME_RE.test(body.call_time)) fail(400, 'Call time looks like 17:30');
   return { title, kind: kinds.includes(body.kind) ? body.kind : 'other', section: SECTIONS.includes(body.section) ? body.section : null,
     starts_at: starts.toISOString(), ends_at: ends && !isNaN(ends) && ends > starts ? ends.toISOString() : null,
-    location: str(body.location, 100) || null, details: str(body.details, 500) || null, call_time: body.call_time || null };
+    location: str(body.location, 100) || null, details: str(body.details, 500) || null, call_time: body.call_time || null, all_day: bool(body.all_day) ? 1 : 0 };
 }
 add('POST', '/api/events', async ({ env, ctx, user, body }) => {
   const e = eventFields(body);
-  const row = await first(env, `INSERT INTO events (title, kind, section, starts_at, ends_at, location, details, call_time, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-    e.title, e.kind, e.section, e.starts_at, e.ends_at, e.location, e.details, e.call_time, user.id);
+  const row = await first(env, `INSERT INTO events (title, kind, section, starts_at, ends_at, location, details, call_time, all_day, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    e.title, e.kind, e.section, e.starts_at, e.ends_at, e.location, e.details, e.call_time, e.all_day, user.id);
   const who = e.section ? await usersWhere(env, `(role = 'parent') OR (role = 'student' AND section = ?)`, e.section) : await usersWhere(env, '1 = 1');
   await notify(env, ctx, who.filter((u) => u.id !== user.id), { type: 'event', title: `📅 ${e.title}`, body: `${when(env, e.starts_at)}${e.call_time ? ` · call ${e.call_time}` : ''}${e.location ? ` · ${e.location}` : ''}`, link: 'calendar' });
   return json({ ok: true, id: row.id });
@@ -684,8 +684,8 @@ add('PATCH', '/api/events/:id', async ({ env, ctx, user, params, body }) => {
     return json({ ok: true });
   }
   const e = eventFields({ ...ev, ...body });
-  await run(env, 'UPDATE events SET title = ?, kind = ?, section = ?, starts_at = ?, ends_at = ?, location = ?, details = ?, call_time = ? WHERE id = ?',
-    e.title, e.kind, e.section, e.starts_at, e.ends_at, e.location, e.details, e.call_time, ev.id);
+  await run(env, 'UPDATE events SET title = ?, kind = ?, section = ?, starts_at = ?, ends_at = ?, location = ?, details = ?, call_time = ?, all_day = ? WHERE id = ?',
+    e.title, e.kind, e.section, e.starts_at, e.ends_at, e.location, e.details, e.call_time, e.all_day, ev.id);
   return json({ ok: true });
 }, { admin: true });
 

@@ -1,5 +1,5 @@
 /* Let's Hang High School (letshang.band) — front end (vanilla JS, no build step).
-   Visual layer: design.css + app.css + theme-pastel.css + band.css. Tools: tools.js. Jokes: jokes.js.
+   Visual layer: hs.css (themes: cardinal, stadium, program). Tools: tools.js. Jokes: jokes.js.
    The server enforces every permission; checks here are only for display. */
 (() => {
   'use strict';
@@ -120,7 +120,7 @@
   function confetti() {
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const box = document.createElement('div'); box.className = 'confetti';
-    const colors = theme() === 'pastel' ? ['#d9c8ff', '#ffc8de', '#c6e6ff', '#d6e4cb', '#ffd8c4', '#fff0b3'] : ['#ffd400', '#ff16c7', '#00eaff', '#19f58a', '#8b00ff', '#ff7a00'];
+    const colors = { cardinal: ['#f2c14e', '#c41e3a', '#fbf3e3', '#ffe199'], stadium: ['#e9b93a', '#f2efe6', '#c8102e', '#5aa9ff'], program: ['#a87a12', '#9e1b32', '#14213d', '#e9b93a'] }[theme()];
     for (let i = 0; i < 40; i++) {
       const p = document.createElement('i');
       p.style.left = Math.random() * 100 + 'vw'; p.style.background = colors[i % colors.length];
@@ -130,19 +130,22 @@
     }
     document.body.appendChild(box); setTimeout(() => box.remove(), 3400);
   }
-  const theme = () => document.documentElement.dataset.theme || 'neon';
+  /* Styles: cardinal (red + gold, default), stadium (navy + gold), program (light). Old saved values map to cardinal. */
+  const THEMES = { cardinal: '#23060b', stadium: '#0a1120', program: '#f3eee2' };
+  const normTheme = (t) => (THEMES[t] ? t : 'cardinal');
+  const theme = () => normTheme(document.documentElement.dataset.theme);
   function applyTheme(t) {
-    const th = ['neon', 'pastel'].includes(t) ? t : 'neon';
+    const th = normTheme(t);
     document.documentElement.dataset.theme = th;
     store.set('lh_theme', th);
-    const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = th === 'pastel' ? '#f4ecff' : '#05070d';
+    const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = THEMES[th];
   }
   function stylePicker() {
     const cur = theme();
     const opt = (k, name, desc, sw) => `<button class="style-opt ${cur === k ? 'on' : ''}" data-act="theme" data-t="${k}" aria-pressed="${cur === k}">
       <span class="sw">${sw.map((c) => `<i style="background:${c}"></i>`).join('')}</span><b>${name}</b><small>${desc}</small></button>`;
     return `<div class="panel stack"><h3>My style</h3><p class="small muted">Only changes how the app looks for you.</p>
-      <div class="style-grid">${opt('neon', 'Neon', 'Graffiti + glow', ['#ff16c7', '#00eaff', '#ffd400', '#12002a'])}${opt('pastel', 'Pastel', 'Soft + dreamy', ['#d9c8ff', '#d6e4cb', '#ffc8de', '#c6e6ff'])}</div></div>`;
+      <div class="style-grid">${opt('cardinal', 'Cardinal', 'Red + gold', ['#c41e3a', '#f2c14e', '#23060b'])}${opt('stadium', 'Stadium', 'Navy + gold', ['#0a1120', '#e9b93a', '#f2efe6'])}${opt('program', 'Program', 'Light mode', ['#f3eee2', '#14213d', '#9e1b32'])}</div></div>`;
   }
   // ================================================================ sounds
   // Little synthesized tunes (no audio files). iPhones only allow sound after the first tap,
@@ -208,20 +211,21 @@
       }
     }
     const sparkle = (at) => [[2637, at, 0.25, 'bell', 0.08], [3136, at + 0.06, 0.3, 'bell', 0.07], [3951, at + 0.12, 0.35, 'bell', 0.05]];
-    const SQ = 'square', V = 0.2; // 8-bit squares are loud — keep them low
+    // a brassy note = quiet sawtooth + triangle an octave down
+    const horn = (f, at, len) => [[f, at, len, 'sawtooth', 0.11], [f / 2, at, len, 'triangle', 0.2]];
     const TUNES = {
-      // NEON — 8-bit arcade
-      neon: {
-        message: [[988, 0, 0.06, SQ, V], [1319, 0.06, 0.1, SQ, V]],                                              // blip-blip
-        ready:   [523, 659, 784, 1047, 1319, 1568, 2093].map((f, i) => [f, i * 0.045, 0.08, SQ, V]),           // power-up!
-        pickup:  [[880, 0, 0.09, SQ, V], [880, 0.14, 0.09, SQ, V], [1175, 0.28, 0.22, SQ, V, 1760]],            // bleep bleep bwoop
-        checkin: [[392, 0, 0.18, SQ, V, 1568], [1568, 0.17, 0.1, SQ, V]],                                      // zip-in
-        approve: [[784, 0, 0.09, SQ, V], [1047, 0.1, 0.09, SQ, V], [1319, 0.2, 0.09, SQ, V], [1568, 0.3, 0.32, SQ, V], [784, 0.3, 0.32, 'triangle', 0.15]], // level clear
+      // FIELD — brass fanfares + snare-ish hits (Cardinal + Stadium)
+      field: {
+        message: [...horn(784, 0, 0.09), ...horn(1047, 0.1, 0.16)],                                            // ta-daa
+        ready:   [...horn(523, 0, 0.1), ...horn(523, 0.12, 0.1), ...horn(523, 0.24, 0.1), ...horn(784, 0.36, 0.45)], // charge!
+        pickup:  [...horn(880, 0, 0.12), ...horn(880, 0.18, 0.12), ...horn(1175, 0.36, 0.35)],
+        checkin: [...horn(587, 0, 0.1), ...horn(880, 0.11, 0.22)],
+        approve: [...horn(523, 0, 0.12), ...horn(659, 0.13, 0.12), ...horn(784, 0.26, 0.12), ...horn(1047, 0.39, 0.5)], // fanfare
         safety:  [[330, 0, 0.18, 'sawtooth', 0.2], [247, 0.2, 0.18, 'sawtooth', 0.2], [330, 0.4, 0.18, 'sawtooth', 0.2], [247, 0.6, 0.3, 'sawtooth', 0.2]],
-        chime:   [[1319, 0, 0.06, SQ, V], [1760, 0.07, 0.12, SQ, V]],
+        chime:   [...horn(1047, 0, 0.08), ...horn(1319, 0.09, 0.14)],
       },
-      // PASTEL — sparkly pop: plucks, glassy bells, dreamy chords
-      pastel: {
+      // GLOCK — bells-section sparkle (Program)
+      glock: {
         message: [[659, 0, 0.35, 'pluck', 0.22], [988, 0.09, 0.5, 'pluck', 0.2], ...sparkle(0.12)],
         ready:   [[523, 0, 1.1, 'pluck', 0.16], [659, 0.05, 1.1, 'pluck', 0.15], [784, 0.1, 1.1, 'pluck', 0.15], [988, 0.15, 1.2, 'pluck', 0.14], [1319, 0.3, 0.9, 'bell', 0.12], ...sparkle(0.35)], // dreamy strum
         pickup:  [[1760, 0, 0.7, 'bell', 0.16], [1760, 0.32, 0.9, 'bell', 0.16], [1319, 0.32, 0.9, 'bell', 0.08]], // ding… ding
@@ -239,7 +243,7 @@
       on, running, kindFor: (type) => KIND[type] || 'chime',
       play(kind, force) {
         if (!force && !on()) return;
-        const set = TUNES[theme()] || TUNES.neon;
+        const set = theme() === 'program' ? TUNES.glock : TUNES.field;
         engine();
         if (!running()) { // stuck — remember it; if it wakes up by itself, forget it, otherwise it plays on the next tap
           missed = { kind, at: Date.now() };
@@ -290,7 +294,7 @@
     return `<div class="panel stack"><h3>🔊 Sounds</h3>
       <label class="switch-row"><span>Play a sound for new notifications</span><input type="checkbox" role="switch" data-act="sound-toggle" ${Sound.on() ? 'checked' : ''}></label>
       <div class="row wrap">${[['message', '💬'], ['pickup', '🚗'], ['ready', '🙋'], ['approve', '✅']].map(([k, e]) => `<button type="button" class="ghost-button sm" data-act="sound-test" data-k="${k}">${e} Test</button>`).join('')}</div>
-      <p class="small muted">${theme() === 'pastel' ? 'Pastel = sparkly pop sounds ✨' : 'Neon = arcade sounds 🕹️'} — they switch with your style. Sounds play while Let's Hang is open. Turn your ringer on (the side switch) and turn the volume up — a big pop-up shows too, even on silent.</p></div>`;
+      <p class="small muted">${theme() === 'program' ? 'Program = glockenspiel bells 🔔' : 'Cardinal + Stadium = brass fanfares 🎺'} — they switch with your style. Sounds play while Let's Hang is open. Turn your ringer on (the side switch) and turn the volume up — a big pop-up shows too, even on silent.</p></div>`;
   }
 
   // ================================================================ navigation
@@ -424,9 +428,7 @@
       <span class="action-icon" aria-hidden="true">${icon}</span>
       <span class="action-label">${label}<span class="action-arrow" aria-hidden="true">→</span></span></button>`;
   const empty = (e, text, btn = '') => `<div class="panel empty"><div class="e" aria-hidden="true">${e}</div><p>${text}</p>${btn}</div>`;
-  const STICKERS = { neon: ['🥁', '🎺', '⚡', '🎷'], pastel: ['✨', '🎶', '🌸', '💿'] };
-  const stickers = () => (STICKERS[theme()] || STICKERS.neon).map((e, i) => `<span class="stk s${i + 1}" aria-hidden="true">${e}</span>`).join('');
-  const heroHTML = (tag) => `<section class="hero">${stickers()}<h1 class="hero-logo"><span class="lets">Let's</span><span class="hang">Hang</span></h1>
+  const heroHTML = (tag) => `<section class="hero"><h1 class="hero-logo"><span class="lets">Let's</span><span class="hang">Hang</span></h1>
     <p class="hero-tagline">${tag}</p><span class="hero-band">High School · ${esc(S.band || S.config?.band || 'Band')}</span></section>`;
 
   // ================================================================ sign in / sign up
@@ -503,7 +505,7 @@
   function eventCard(e) {
     return `<div class="ev k-${e.kind} ${e.cancelled ? 'cancelled' : ''}"><span class="ev-em" aria-hidden="true">${EV_EM[e.kind] || '📌'}</span><div>
       <h3><button class="linkish ev-link" data-act="open" data-view="hub" data-id="${e.id}">${esc(e.title)}</button></h3>
-      <p class="small">${whenText(e.starts_at)}${e.call_time ? ` · <b>Call ${hm(e.call_time)}</b>` : ''}${e.section ? ` · ${secEm(e.section)} ${secName(e.section)}` : ''}</p>
+      <p class="small">${evWhen(e)}${e.call_time ? ` · <b>Call ${hm(e.call_time)}</b>` : ''}${e.section ? ` · ${secEm(e.section)} ${secName(e.section)}` : ''}</p>
       ${e.location ? `<p class="small muted">📍 ${esc(e.location)}</p>` : ''}${e.details ? `<p class="small muted">${esc(e.details)}</p>` : ''}
       ${e.cancelled ? '<span class="pill st-declined">Cancelled</span>' : `<p class="small">${e.going ? `🙋 ${e.going} going` : ''}${e.my_rsvp === 'going' ? ' · <b>you\'re in</b>' : ''} <button class="linkish small" data-act="open" data-view="hub" data-id="${e.id}">${['competition', 'game', 'concert'].includes(e.kind) ? 'Open hub →' : 'Details →'}</button></p>`}
       ${S.me.is_admin && !e.cancelled ? `<div class="row wrap small-gap" style="margin-top:6px"><button class="linkish small" data-act="event-cancel" data-id="${e.id}">Cancel event</button></div>` : ''}</div></div>`;
@@ -764,7 +766,7 @@
     return `<button class="countdown-card" data-act="open" data-view="hub" data-id="${next.id}">
       <span class="cd-label">${EV_EM[next.kind]} Next ${next.kind}</span><b class="cd-title">${esc(next.title)}</b>
       <span class="cd-time" data-countdown="${next.starts_at}">${countdownText(next.starts_at)}</span>
-      <span class="cd-sub">${whenText(next.starts_at)}${next.call_time ? ` · call ${hm(next.call_time)}` : ''} · Open the hub →</span></button>`;
+      <span class="cd-sub">${evWhen(next)}${next.call_time ? ` · call ${hm(next.call_time)}` : ''} · Open the hub →</span></button>`;
   }
   function viewHub() {
     const h = S.hub;
@@ -776,7 +778,7 @@
     return `${subHeader(`${EV_EM[e.kind] || '📌'} ${isBig ? 'Hub' : 'Event'}`, S.me.is_admin ? '<button class="warm-button sm" data-act="hub-edit">Edit</button>' : '')}
       <div class="hub-hero ${e.cancelled ? 'cancelled' : ''}">
         <h2>${esc(e.title)}</h2>
-        <p>${whenText(e.starts_at)}${e.location ? ` · 📍 ${esc(e.location)}` : ''}</p>
+        <p>${evWhen(e)}${e.location ? ` · 📍 ${esc(e.location)}` : ''}</p>
         ${e.cancelled ? '<span class="pill st-declined">Cancelled</span>' : `<div class="cd-big" data-countdown="${e.starts_at}">${countdownText(e.starts_at)}</div>`}
         ${e.call_time ? `<div class="call-time">Call time <b>${hm(e.call_time)}</b></div>` : ''}
         ${myBus ? `<div class="my-bus">🚌 You're on <b>${esc(myBus.name)}</b>${myBus.notes ? ` · ${esc(myBus.notes)}` : ''}</div>` : ''}
@@ -982,6 +984,12 @@
   const nowPlus = (min) => { const d = new Date(Date.now() + min * 60e3); d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0); return d; };
   const dtFields = (d) => `<div class="row"><label class="fld grow"><span>Day</span><input class="field" type="date" name="date" min="${localDate()}" value="${localDate(d)}" required></label>
       <label class="fld grow"><span>Time</span><input class="field" type="time" name="time" value="${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}" required></label></div>`;
+  // all-day events show the day(s), not a clock time
+  const evWhen = (e) => {
+    if (!e.all_day) return whenText(e.starts_at);
+    const a = dayLabel(new Date(e.starts_at)), b = e.ends_at ? dayLabel(new Date(e.ends_at)) : a;
+    return `${a === b ? a : `${a} – ${b}`} · All day`;
+  };
   const isoFrom = (fd) => new Date(`${fd.get('date')}T${fd.get('time')}`).toISOString();
   const cancelBtn = '<button type="button" class="ghost-button block" data-act="close-sheet">Cancel</button>';
   const errP = '<p class="form-error" data-err role="alert"></p>';
@@ -1046,6 +1054,7 @@
       <div class="chips" role="group">${Object.entries(EV_EM).map(([k, e], i) => `<button type="button" class="chip" data-act="pick" data-name="kind" data-v="${k}" aria-pressed="${i === 0}">${e} ${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
       <input type="hidden" name="kind" value="rehearsal">
       ${dtFields(nowPlus(24 * 60))}
+      <label class="check"><input type="checkbox" name="all_day"> All day (contests, festivals, trips)</label>
       <label class="fld"><span>Call time (optional)</span><input class="field" type="time" name="call_time"></label>
       <label class="fld"><span>Who</span><select class="field" name="section"><option value="">Whole band</option>${(S.config?.sections || []).map((k) => `<option value="${k}">${secName(k)}</option>`).join('')}</select></label>
       <label class="fld"><span>Where</span><input class="field" name="location" maxlength="100" placeholder="Band room, Howard Wood Field…"></label>
@@ -1130,7 +1139,7 @@
     }
     return { ids: [...ids], unknown };
   }
-  async function refreshMe() { const d = await api('/me'); S.me = d.user; S.band = d.band; S.badges = d.badges; S.smsLive = d.sms_live; soundCheck(d.badges); if (S.me.theme && S.me.theme !== theme()) applyTheme(S.me.theme); }
+  async function refreshMe() { const d = await api('/me'); S.me = d.user; S.band = d.band; S.badges = d.badges; S.smsLive = d.sms_live; soundCheck(d.badges); if (THEMES[S.me.theme] && S.me.theme !== theme()) applyTheme(S.me.theme); }
 
   const A = {
     tab: (el) => go(el.dataset.tab),
@@ -1138,7 +1147,7 @@
     back: () => back(),
     door: (el) => { S.door = el.dataset.door; S.authMode = 'login'; store.set('lhb_door', S.door); render(); },
     'auth-mode': (el) => { S.authMode = el.dataset.mode; render(); },
-    theme: (el) => { applyTheme(el.dataset.t); if (S.me) { S.me.theme = el.dataset.t; api('/me', { method: 'PATCH', body: { theme: el.dataset.t } }).catch(() => {}); } if (S.me) paint(); else render(); toast(el.dataset.t === 'pastel' ? '🌸 Pastel on' : '⚡ Neon on'); },
+    theme: (el) => { applyTheme(el.dataset.t); if (S.me) { S.me.theme = el.dataset.t; api('/me', { method: 'PATCH', body: { theme: el.dataset.t } }).catch(() => {}); } if (S.me) paint(); else render(); toast({ cardinal: '🔴 Cardinal on', stadium: '🏟️ Stadium on', program: '📜 Program on' }[theme()]); },
     'close-sheet': () => closeSheet(),
     'close-sheet-bg': (el, e) => { if (e.target === el) closeSheet(); },
     'joke-next': () => { S.jokeOffset++; paint(); },
@@ -1349,7 +1358,7 @@
       closeSheet(); confetti(); toast('🍕 Hangout posted'); if (S.view?.name !== 'hangouts') open('hangouts'); else loadForScreen();
     },
     spot: async (f, d) => { await api('/spots', { method: 'POST', body: Object.fromEntries(d) }); closeSheet(); toast('📍 Spot added'); S.spots = null; loadForScreen(); },
-    event: async (f, d) => { await api('/events', { method: 'POST', body: { title: d.get('title'), kind: d.get('kind'), starts_at: isoFrom(d), call_time: d.get('call_time') || null, section: d.get('section') || null, location: d.get('location'), details: d.get('details') } }); closeSheet(); toast('📅 Event added — everyone notified'); loadForScreen(); },
+    event: async (f, d) => { await api('/events', { method: 'POST', body: { title: d.get('title'), kind: d.get('kind'), starts_at: d.get('all_day') ? new Date(`${d.get('date')}T08:00`).toISOString() : isoFrom(d), all_day: !!d.get('all_day'), call_time: d.get('call_time') || null, section: d.get('section') || null, location: d.get('location'), details: d.get('details') } }); closeSheet(); toast('📅 Event added — everyone notified'); loadForScreen(); },
     profile: async (f, d) => { const body = Object.fromEntries(d); if (body.grade === '') body.grade = null; await api('/me', { method: 'PATCH', body }); await refreshMe(); closeSheet(); render(); toast('Saved ✨'); },
     phone: async (f, d) => { await api('/me', { method: 'PATCH', body: { phone: d.get('phone'), sms_opt_in: d.get('sms_opt_in') === 'on' } }); await refreshMe(); toast('Saved'); },
     password: async (f, d) => { await api('/me', { method: 'PATCH', body: Object.fromEntries(d) }); f.reset(); toast('Password updated'); },
@@ -1413,7 +1422,7 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.me && S.tab !== 'tools') loadForScreen(); });
 
   // ================================================================ boot
-  applyTheme(store.get('lh_theme', 'neon'));
+  applyTheme(store.get('lh_theme', 'cardinal'));
   try {
     const q = new URLSearchParams(location.search);
     if (q.has('signup')) { S.door = q.get('signup') === 'parent' ? 'parent' : 'student'; S.authMode = 'signup'; history.replaceState(null, '', '/'); }
