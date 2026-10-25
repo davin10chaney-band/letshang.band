@@ -1,0 +1,349 @@
+/* LET'S HANG — NEON GRAFFITI DESIGN SYSTEM
+   Based on the supplied Let's Hang home-screen design.
+*/
+
+:root {
+  --black: #05070d;
+  --deep: #09001a;
+  --white: #fff;
+  --cyan: #00eaff;
+  --blue: #1478ff;
+  --purple: #8b00ff;
+  --pink: #ff16c7;
+  --yellow: #ffd400;
+  --orange: #ff7a00;
+  --green: #19f58a;
+  --radius-lg: 22px;
+  --radius-md: 18px;
+  --display: "Bangers", "Permanent Marker", Impact, sans-serif;
+  --body: "Nunito Sans", Inter, system-ui, sans-serif;
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--black);
+  color: var(--white);
+  font-family: var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+
+button, a, input, select, textarea { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+
+.app {
+  position: relative;
+  min-height: 100vh;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(255,0,199,.18), transparent 22%),
+    radial-gradient(circle at 90% 15%, rgba(0,234,255,.16), transparent 24%),
+    linear-gradient(145deg, #03050a, #080016 48%, #03050a);
+}
+
+.topbar {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(env(safe-area-inset-top) + 16px) 18px 12px;
+}
+
+.profile-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.profile-avatar {
+  width: 48px;
+  height: 48px;
+  border: 3px solid var(--yellow);
+  border-radius: 50%;
+  box-shadow: 0 0 10px rgba(255,212,0,.8), 0 0 26px rgba(255,122,0,.35);
+  object-fit: cover;
+}
+
+.greeting {
+  margin: 0;
+  font-family: var(--display);
+  font-size: clamp(20px, 5vw, 30px);
+  line-height: .95;
+}
+
+.greeting strong {
+  display: block;
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(0,234,255,.7);
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.icon-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 2px solid rgba(255,255,255,.85);
+  border-radius: 14px;
+  color: white;
+  background: rgba(0,0,0,.48);
+}
+
+.icon-button:focus-visible {
+  outline: 3px solid var(--yellow);
+  outline-offset: 3px;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -7px;
+  right: -5px;
+  min-width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #ff1f65;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.hero {
+  position: relative;
+  z-index: 2;
+  padding: 10px 18px 20px;
+  text-align: center;
+}
+
+.hero-logo {
+  max-width: 92%;
+  margin: 0 auto;
+  font-family: var(--display);
+  font-size: clamp(68px, 19vw, 142px);
+  line-height: .72;
+  transform: rotate(-2deg);
+  text-shadow: 4px 5px 0 #080016, 0 0 18px rgba(0,234,255,.45);
+}
+
+.hero-logo .lets {
+  display: block;
+  color: white;
+}
+
+.hero-logo .hang {
+  display: block;
+  margin-top: 8px;
+  background: linear-gradient(90deg,#ff6a00,#ffd000,#ff2fcf,#00dfff,#19f58a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero-tagline {
+  margin: 22px auto 0;
+  max-width: 360px;
+  font-family: var(--display);
+  font-size: clamp(18px, 5vw, 28px);
+  line-height: 1.05;
+  text-transform: uppercase;
+  text-shadow: 2px 2px 0 #070012;
+}
+
+.hero-tagline::after {
+  content: "";
+  display: block;
+  width: 110px;
+  height: 5px;
+  margin: 8px auto 0;
+  border-radius: 999px;
+  background: var(--yellow);
+  box-shadow: 0 0 10px rgba(255,212,0,.8);
+}
+
+.dashboard-grid {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 8px 18px 18px;
+}
+
+.action-card {
+  position: relative;
+  min-height: 150px;
+  padding: 18px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 3px solid currentColor;
+  border-radius: var(--radius-lg);
+  color: var(--cyan);
+  background: rgba(7,0,20,.78);
+  text-decoration: none;
+  overflow: hidden;
+  transition: transform .16s ease, filter .16s ease;
+}
+
+.action-card:hover,
+.action-card:focus-visible {
+  transform: translateY(-3px) scale(1.015);
+  filter: brightness(1.1);
+}
+
+.action-card:active { transform: scale(.975); }
+
+.action-icon {
+  font-size: 42px;
+  line-height: 1;
+  filter: drop-shadow(0 0 8px currentColor);
+}
+
+.action-label {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--display);
+  font-size: clamp(22px, 6vw, 32px);
+  line-height: .9;
+  text-transform: uppercase;
+  color: white;
+  text-shadow: 2px 3px 0 #05000c;
+}
+
+.action-arrow {
+  font-size: 30px;
+  font-weight: 900;
+}
+
+.chat { color: var(--purple); box-shadow: 0 0 10px rgba(139,0,255,.85),0 0 30px rgba(139,0,255,.45); }
+.friends { color: var(--blue); box-shadow: 0 0 10px rgba(20,120,255,.8),0 0 28px rgba(20,120,255,.45); }
+.games { color: var(--cyan); box-shadow: 0 0 10px rgba(0,234,255,.8),0 0 28px rgba(0,234,255,.45); }
+.plan { color: var(--yellow); box-shadow: 0 0 10px rgba(255,212,0,.8),0 0 26px rgba(255,122,0,.35); }
+.profile { color: var(--pink); box-shadow: 0 0 10px rgba(255,22,199,.85),0 0 30px rgba(255,22,199,.45); }
+.settings { color: var(--purple); box-shadow: 0 0 10px rgba(139,0,255,.85),0 0 30px rgba(139,0,255,.45); }
+
+.motivation-banner {
+  position: relative;
+  z-index: 3;
+  margin: 4px 18px 24px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 3px solid var(--cyan);
+  border-radius: var(--radius-lg);
+  background: rgba(0,0,0,.62);
+  box-shadow: 0 0 10px rgba(0,234,255,.8), 0 0 28px rgba(0,234,255,.45);
+}
+
+.motivation-copy {
+  margin: 0;
+  font-family: var(--display);
+  font-size: clamp(20px,5.5vw,30px);
+  line-height: .95;
+  text-transform: uppercase;
+}
+
+.bottom-nav {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: repeat(5,1fr);
+  padding: 10px 8px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(255,255,255,.14);
+  background: rgba(2,3,8,.96);
+  backdrop-filter: blur(16px);
+}
+
+.nav-item {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 5px 2px;
+  color: rgba(255,255,255,.9);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.nav-icon { font-size: 26px; }
+.nav-item.active { color: var(--cyan); text-shadow: 0 0 10px rgba(0,234,255,.75); }
+
+.panel {
+  margin: 16px 18px;
+  padding: 20px;
+  border: 2px solid rgba(0,234,255,.8);
+  border-radius: var(--radius-lg);
+  background: rgba(5,2,18,.86);
+  box-shadow: 0 0 10px rgba(0,234,255,.8);
+}
+
+.field {
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 14px;
+  border: 2px solid rgba(255,255,255,.3);
+  border-radius: 14px;
+  outline: none;
+  color: white;
+  background: rgba(0,0,0,.55);
+}
+
+.field:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 10px rgba(0,234,255,.8);
+}
+
+.primary-button,
+.secondary-button,
+.danger-button {
+  min-height: 52px;
+  padding: 12px 20px;
+  border: 0;
+  border-radius: 999px;
+  color: white;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.primary-button { background: linear-gradient(90deg,var(--blue),var(--cyan)); }
+.secondary-button { background: linear-gradient(90deg,var(--purple),var(--pink)); }
+.danger-button { background: linear-gradient(90deg,#ff244f,#ff006e); }
+
+:focus-visible {
+  outline: 3px solid var(--yellow);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}
+
+@media (min-width: 640px) {
+  .app { max-width: 520px; margin: 0 auto; }
+  .dashboard-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
+}
+
+@media (max-width: 360px) {
+  .dashboard-grid { gap: 10px; padding-left: 12px; padding-right: 12px; }
+  .action-card { min-height: 132px; padding: 14px 11px; }
+  .action-label { font-size: 20px; }
+}

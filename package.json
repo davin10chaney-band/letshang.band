@@ -1,0 +1,14 @@
+{
+  "name": "letshang-band",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Let's Hang High School — band threads, sheet music, metronome and rudiments, rides and hangouts for high school musicians",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
